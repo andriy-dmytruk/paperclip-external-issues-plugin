@@ -1,0 +1,26 @@
+{
+  "name": "agent-companies-manager",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Paperclip plugin scaffold for managing agent companies.",
+  "type": "module",
+  "paperclipPlugin": {
+    "manifest": "./dist/manifest.js",
+    "worker": "./dist/worker.js",
+    "ui": "./dist/ui/"
+  },
+  "scripts": {
+    "build": "node ./scripts/noop.mjs build",
+    "test": "node --experimental-strip-types --test tests/plugin.spec.ts",
+    "test:e2e": "pnpm exec playwright install chromium && node ./scripts/e2e/run-paperclip-smoke.mjs",
+    "typecheck": "node ./scripts/noop.mjs typecheck",
+    "lint": "node ./scripts/noop.mjs lint"
+  },
+  "dependencies": {
+    "@paperclipai/plugin-sdk": "^2026.403.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "playwright": "^1.58.0"
+  }
+}

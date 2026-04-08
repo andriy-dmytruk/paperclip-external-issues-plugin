@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "skills": {
+    "company-creator": {
+      "source": "paperclipai/companies",
+      "sourceType": "github",
+      "computedHash": "3a0162621090612938285ae4ee11ea7d7059483cd051051b406fd07690ddfe0c"
+    },
+    "design-guide": {
+      "source": "paperclipai/paperclip",
+      "sourceType": "github",
+      "computedHash": "98ac5d4eba74071a9a1199a27a5c6453a755a1f1faaefe31d787985e4863ea6e"
+    },
+    "frontend-design": {
+      "source": "anthropics/skills",
+      "sourceType": "github",
+      "computedHash": "063a0e6448123cd359ad0044cc46b0e490cc7964d45ef4bb9fd842bd2ffbca67"
+    },
+    "paperclip": {
+      "source": "paperclipai/paperclip",
+      "sourceType": "github",
+      "computedHash": "bb0636f3b5737609d68d6c4b98444f615a21e9aa5644f2aad9bde3331cf5ada8"
+    },
+    "paperclip-create-agent": {
+      "source": "paperclipai/paperclip",
+      "sourceType": "github",
+      "computedHash": "76c81419d8d5f00447c862ecd228e7ba05c3f69a5ab8e7b3a24b8e6eeccb4bc6"
+    },
+    "paperclip-create-plugin": {
+      "source": "paperclipai/paperclip",
+      "sourceType": "github",
+      "computedHash": "27d7a689e0b60d34d920a9b2f9fb423eaa4652e4ad897f850c5371a437fa1538"
+    },
+    "web-design-guidelines": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "computedHash": "f3bc47f890f42a44db1007ab390709ec368e4b8c089baee6b0007182236ac474"
+    }
+  }
+}
