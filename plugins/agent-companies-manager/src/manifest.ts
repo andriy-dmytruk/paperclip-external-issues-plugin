@@ -4,7 +4,7 @@ export const manifest = {
   version: '0.1.0',
   displayName: 'Agent Companies Manager',
   description: 'A Paperclip plugin scaffold for managing agent companies.',
-  author: 'Alvaro Sanchez',
+  author: 'Álvaro Sánchez-Mariscal',
   categories: ['workspace'],
   capabilities: ['ui.page.register'],
   entrypoints: {
