@@ -6,32 +6,69 @@ import { createTestHarness } from '@paperclipai/plugin-sdk/testing';
 import manifest from '../src/manifest.ts';
 import plugin from '../src/worker.ts';
 
-test('manifest exposes GitHub Sync settings page metadata', () => {
+test('manifest exposes GitHub Sync settings page metadata, config schema, and job', () => {
   assert.equal(manifest.id, 'github-sync');
   assert.equal(manifest.apiVersion, 1);
   assert.equal(manifest.entrypoints.worker, './dist/worker.js');
+  assert.equal(manifest.jobs?.[0]?.jobKey, 'sync.github-issues');
+  assert.equal((manifest.instanceConfigSchema as { properties?: Record<string, unknown> }).properties?.githubTokenRef ? 'present' : 'missing', 'present');
   const firstSlot = manifest.ui?.slots?.[0];
   assert.ok(firstSlot);
   assert.equal(firstSlot?.type, 'settingsPage');
   assert.equal(firstSlot?.exportName, 'GitHubSyncSettingsPage');
 });
 
-test('worker scaffold status returns default message and action updates it', async () => {
+test('worker saves normalized mappings with resolved project identifiers supplied by UI', async () => {
   const harness = createTestHarness({ manifest });
   await plugin.definition.setup(harness.ctx);
 
-  const initial = await harness.getData('scaffold.status', {});
-  assert.deepEqual(initial, {
-    ready: true,
-    message: 'GitHub Sync scaffold is connected and ready for future features.'
+  const result = await harness.performAction('settings.saveRegistration', {
+    mappings: [
+      {
+        id: 'mapping-a',
+        repositoryUrl: '  https://github.com/paperclipai/example-repo  ',
+        paperclipProjectName: 'Engineering',
+        paperclipProjectId: 'project-1',
+        companyId: 'company-1'
+      }
+    ],
+    syncState: {
+      status: 'idle'
+    }
   });
 
-  const result = await harness.performAction('scaffold.markReady', {});
-  assert.equal((result as { ready: boolean }).ready, true);
-  assert.equal((result as { message: string }).message, 'GitHub Sync scaffold action executed successfully.');
-  assert.equal(typeof (result as { updatedAt: string }).updatedAt, 'string');
+  assert.deepEqual(result, {
+    mappings: [
+      {
+        id: 'mapping-a',
+        repositoryUrl: 'https://github.com/paperclipai/example-repo',
+        paperclipProjectName: 'Engineering',
+        paperclipProjectId: 'project-1',
+        companyId: 'company-1'
+      }
+    ],
+    syncState: {
+      status: 'idle',
+      message: undefined,
+      checkedAt: undefined,
+      syncedIssuesCount: undefined,
+      createdIssuesCount: undefined,
+      skippedIssuesCount: undefined,
+      lastRunTrigger: undefined
+    },
+    updatedAt: (result as { updatedAt: string }).updatedAt
+  });
+});
 
-  const updated = await harness.getData('scaffold.status', {}) as { ready: boolean; message: string };
-  assert.equal(updated.ready, true);
-  assert.equal(updated.message, 'GitHub Sync scaffold action executed successfully.');
+test('worker reports sync error when configuration is incomplete', async () => {
+  const harness = createTestHarness({ manifest });
+  await plugin.definition.setup(harness.ctx);
+
+  const result = await harness.performAction('sync.runNow', {}) as {
+    syncState: { status: string; message?: string; lastRunTrigger?: string };
+  };
+
+  assert.equal(result.syncState.status, 'error');
+  assert.equal(result.syncState.message, 'Configure a GitHub token secret before running sync.');
+  assert.equal(result.syncState.lastRunTrigger, 'manual');
 });

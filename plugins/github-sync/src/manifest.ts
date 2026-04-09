@@ -5,10 +5,37 @@ export const manifest: PaperclipPluginManifestV1 = {
   apiVersion: 1,
   version: '0.1.0',
   displayName: 'GitHub Sync',
-  description: 'Scaffold plugin for future GitHub synchronization workflows.',
+  description: 'Synchronize GitHub issues into Paperclip projects.',
   author: 'Álvaro Sánchez-Mariscal',
   categories: ['workspace'],
-  capabilities: ['ui.page.register', 'plugin.state.read', 'plugin.state.write', 'instance.settings.register'],
+  capabilities: [
+    'ui.page.register',
+    'plugin.state.read',
+    'plugin.state.write',
+    'instance.settings.register',
+    'issues.create',
+    'jobs.schedule',
+    'http.outbound',
+    'secrets.read-ref'
+  ],
+  instanceConfigSchema: {
+    type: 'object',
+    properties: {
+      githubTokenRef: {
+        type: 'string',
+        title: 'GitHub Token Secret',
+        format: 'secret-ref'
+      }
+    }
+  },
+  jobs: [
+    {
+      jobKey: 'sync.github-issues',
+      displayName: 'Sync GitHub issues',
+      description: 'Imports GitHub repository issues into Paperclip.',
+      schedule: '*/15 * * * *'
+    }
+  ],
   entrypoints: {
     worker: './dist/worker.js',
     ui: './dist/ui/'

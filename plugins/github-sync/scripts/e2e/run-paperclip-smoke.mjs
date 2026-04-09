@@ -374,9 +374,11 @@ async function main() {
     log(`Opened plugin settings detail page: ${settingsUrl}`);
 
     await page.getByRole('heading', { name: 'GitHub Sync' }).waitFor({ timeout: 120000 });
-    await page.getByRole('heading', { name: 'GitHub Sync' }).waitFor({ timeout: 120000 });
-    await page.getByRole('button', { name: 'Run scaffold action' }).click();
-    await page.getByText('GitHub Sync scaffold action executed successfully.', { exact: false }).waitFor({ timeout: 120000 });
+    await page.getByText('GitHub Sync settings', { exact: true }).waitFor({ timeout: 120000 });
+    await page.getByRole('tab', { name: 'GitHub token' }).waitFor({ timeout: 120000 });
+    await page.getByRole('tab', { name: 'Repository mappings' }).waitFor({ timeout: 120000 });
+    await page.getByRole('tab', { name: 'Sync' }).waitFor({ timeout: 120000 });
+    await page.getByRole('tab', { name: 'Repository mappings' }).click();
 
     await page.screenshot({ path: join(pluginRoot, 'tests/e2e/results/last-run.png'), fullPage: true });
     const bodyText = await page.locator('body').textContent();

@@ -10,18 +10,21 @@
     "ui": "./dist/ui/"
   },
   "scripts": {
-    "build": "node ./scripts/noop.mjs build",
+    "build": "node ./scripts/build.mjs",
     "test": "node --experimental-strip-types --test tests/plugin.spec.ts",
-    "test:e2e": "pnpm exec playwright install chromium && node ./scripts/e2e/run-paperclip-smoke.mjs",
-    "verify:manual": "pnpm exec playwright install chromium && node ./scripts/e2e/manual-paperclip-verify.mjs",
-    "typecheck": "node ./scripts/noop.mjs typecheck",
+    "test:e2e": "pnpm build && pnpm exec playwright install chromium && node ./scripts/e2e/run-paperclip-smoke.mjs",
+    "verify:manual": "pnpm build && pnpm exec playwright install chromium && node ./scripts/e2e/manual-paperclip-verify.mjs",
+    "typecheck": "tsc --noEmit",
     "lint": "node ./scripts/noop.mjs lint"
   },
   "dependencies": {
+    "@octokit/rest": "^22.0.0",
     "@paperclipai/plugin-sdk": "^2026.403.0"
   },
   "devDependencies": {
     "@types/node": "^24.5.2",
-    "playwright": "^1.58.0"
+    "esbuild": "^0.25.3",
+    "playwright": "^1.58.0",
+    "typescript": "^5.9.2"
   }
 }
