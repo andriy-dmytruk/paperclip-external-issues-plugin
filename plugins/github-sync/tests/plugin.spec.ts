@@ -6,6 +6,15 @@ import { createTestHarness } from '@paperclipai/plugin-sdk/testing';
 import manifest from '../src/manifest.ts';
 import plugin from '../src/worker.ts';
 
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      'content-type': 'application/json'
+    }
+  });
+}
+
 test('manifest exposes GitHub Sync dashboard and settings UI metadata, config schema, and job', () => {
   assert.equal(manifest.id, 'github-sync');
   assert.equal(manifest.apiVersion, 1);
@@ -157,6 +166,119 @@ test('worker validates a GitHub token by reaching the GitHub API', async () => {
     assert.deepEqual(result, {
       login: 'octocat'
     });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('worker imports GitHub subissues as Paperclip child issues and skips them on repeat syncs', async () => {
+  const harness = createTestHarness({
+    manifest,
+    capabilities: [...manifest.capabilities, 'issues.read'],
+    config: {
+      githubTokenRef: 'github-secret-ref'
+    }
+  });
+  await plugin.definition.setup(harness.ctx);
+
+  await harness.performAction('settings.saveRegistration', {
+    mappings: [
+      {
+        id: 'mapping-a',
+        repositoryUrl: 'paperclipai/example-repo',
+        paperclipProjectName: 'Engineering',
+        paperclipProjectId: 'project-1',
+        companyId: 'company-1'
+      }
+    ],
+    syncState: {
+      status: 'idle'
+    }
+  });
+
+  const originalFetch = globalThis.fetch;
+  const parentIssue = {
+    id: 1001,
+    number: 10,
+    title: 'Parent issue',
+    body: 'Parent body',
+    html_url: 'https://github.com/paperclipai/example-repo/issues/10',
+    state: 'closed'
+  };
+  const childIssue = {
+    id: 1002,
+    number: 11,
+    title: 'Child issue',
+    body: 'Child body',
+    html_url: 'https://github.com/paperclipai/example-repo/issues/11',
+    state: 'open'
+  };
+
+  globalThis.fetch = async (input) => {
+    const rawUrl = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+    const url = new URL(rawUrl);
+
+    if (url.pathname === '/repos/paperclipai/example-repo/issues' && url.searchParams.get('state') === 'open') {
+      return jsonResponse([childIssue]);
+    }
+
+    if (url.pathname === '/repos/paperclipai/example-repo/issues/11/parent') {
+      return jsonResponse(parentIssue);
+    }
+
+    if (url.pathname === '/repos/paperclipai/example-repo/issues/10/parent') {
+      return jsonResponse({ message: 'Not Found' }, 404);
+    }
+
+    throw new Error(`Unexpected GitHub request: ${url.toString()}`);
+  };
+
+  try {
+    const firstSync = await harness.performAction('sync.runNow', {}) as {
+      syncState: { status: string; createdIssuesCount?: number; skippedIssuesCount?: number; syncedIssuesCount?: number };
+    };
+
+    assert.equal(firstSync.syncState.status, 'success');
+    assert.equal(firstSync.syncState.createdIssuesCount, 2);
+    assert.equal(firstSync.syncState.skippedIssuesCount, 0);
+    assert.equal(firstSync.syncState.syncedIssuesCount, 2);
+
+    const importedIssues = await harness.ctx.issues.list({
+      companyId: 'company-1'
+    });
+
+    assert.equal(importedIssues.length, 2);
+    const importedParent = importedIssues.find((issue) => issue.title === '[GitHub] Parent issue');
+    const importedChild = importedIssues.find((issue) => issue.title === '[GitHub] Child issue');
+
+    assert.ok(importedParent);
+    assert.ok(importedChild);
+    assert.equal(importedChild?.parentId, importedParent?.id);
+
+    const importRegistryAfterFirstSync = harness.getState({
+      scopeKind: 'instance',
+      stateKey: 'github-sync-import-registry'
+    }) as Array<{ githubIssueId: number }>;
+
+    assert.deepEqual(
+      importRegistryAfterFirstSync.map((entry) => entry.githubIssueId).sort((left, right) => left - right),
+      [1001, 1002]
+    );
+
+    const secondSync = await harness.performAction('sync.runNow', {}) as {
+      syncState: { status: string; createdIssuesCount?: number; skippedIssuesCount?: number; syncedIssuesCount?: number };
+    };
+
+    assert.equal(secondSync.syncState.status, 'success');
+    assert.equal(secondSync.syncState.createdIssuesCount, 0);
+    assert.equal(secondSync.syncState.skippedIssuesCount, 2);
+    assert.equal(secondSync.syncState.syncedIssuesCount, 2);
+
+    const importedIssuesAfterSecondSync = await harness.ctx.issues.list({
+      companyId: 'company-1'
+    });
+
+    assert.equal(importedIssuesAfterSecondSync.length, 2);
   } finally {
     globalThis.fetch = originalFetch;
   }

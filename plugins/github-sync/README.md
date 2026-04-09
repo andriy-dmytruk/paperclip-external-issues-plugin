@@ -15,6 +15,7 @@ This package now includes:
 - a scheduled sync job declaration that checks every minute and runs when the saved cadence is due
 - a manual sync action from the settings page
 - GitHub issue fetching through Octokit
+- GitHub subissue imports that preserve Paperclip parent-child issue relationships
 - sync status reporting in the settings UI
 - plugin-owned deduplication so repeated sync runs skip GitHub issues that were already imported
 - reusable end-to-end automation that boots an isolated Paperclip instance, installs the plugin, and verifies the settings UI renders in the real host
@@ -30,7 +31,7 @@ This package now includes:
 ## Current package layout
 
 - `src/manifest.ts` - plugin manifest source, including dashboard/settings UI slots, the scheduled job declaration, and config schema
-- `src/worker.ts` - worker logic for persisted mappings, sync state, configurable scheduled sync cadence, GitHub issue fetching, and deduplication
+- `src/worker.ts` - worker logic for persisted mappings, sync state, configurable scheduled sync cadence, GitHub issue fetching, subissue parent-chain imports, and deduplication
 - `src/ui/index.tsx` - dashboard widget and settings page UI for token secret creation, mappings, configurable sync cadence, and sync status
 - `dist/` - built plugin artifacts consumed by Paperclip
 - `tests/plugin.spec.ts` - package-level tests
@@ -40,4 +41,4 @@ This package now includes:
 
 ## Notes
 
-The package now has a real build step so `dist/` stays aligned with `src/` before manual verification or plugin installation. The dashboard widget surfaces the current blocker or readiness state and links back to plugin setup. Saving a token validates it against the GitHub API, creates or reuses a company secret, and stores only the returned secret UUID in plugin config. Saving setup now persists both repository mappings and the selected automatic sync cadence. Scheduled job ticks happen every minute, and the worker skips runs until the saved cadence is actually due. Saving a mapping creates or reuses the target Paperclip project and binds the GitHub repository URL to the project workspace. Repeated sync runs keep a plugin-owned import registry so previously imported GitHub issues are skipped instead of being recreated.
+The package now has a real build step so `dist/` stays aligned with `src/` before manual verification or plugin installation. The dashboard widget surfaces the current blocker or readiness state and links back to plugin setup. Saving a token validates it against the GitHub API, creates or reuses a company secret, and stores only the returned secret UUID in plugin config. Saving setup now persists both repository mappings and the selected automatic sync cadence. Scheduled job ticks happen every minute, and the worker skips runs until the saved cadence is actually due. Saving a mapping creates or reuses the target Paperclip project and binds the GitHub repository URL to the project workspace. Repeated sync runs keep a plugin-owned import registry so previously imported GitHub issues are skipped instead of being recreated. When GitHub returns subissues, the worker now imports their parent chain as needed and creates the Paperclip issues with matching parent-child relationships.

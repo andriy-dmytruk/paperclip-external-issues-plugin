@@ -17,6 +17,7 @@ const IMPORT_REGISTRY_SCOPE = {
 };
 
 const DEFAULT_SCHEDULE_FREQUENCY_MINUTES = 15;
+const GITHUB_API_VERSION = '2026-03-10';
 
 interface RepositoryMapping {
   id: string;
@@ -61,6 +62,7 @@ interface GitHubIssueRecord {
   body: string | null;
   htmlUrl: string;
   state: string;
+  parentIssueId?: number;
 }
 
 interface TokenValidationResult {
@@ -73,6 +75,16 @@ interface ParsedRepositoryReference {
   url: string;
 }
 
+interface GitHubApiIssueRecord {
+  id: number;
+  number: number;
+  title: string;
+  body?: string | null;
+  html_url: string;
+  state: string;
+  pull_request?: unknown;
+}
+
 const DEFAULT_SETTINGS: GitHubSyncSettings = {
   mappings: [],
   syncState: {
@@ -83,6 +95,15 @@ const DEFAULT_SETTINGS: GitHubSyncSettings = {
 
 function createMappingId(index: number): string {
   return `mapping-${index + 1}`;
+}
+
+function getErrorStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object' || !('status' in error)) {
+    return undefined;
+  }
+
+  const status = (error as { status?: unknown }).status;
+  return typeof status === 'number' ? status : undefined;
 }
 
 function normalizeConfig(value: unknown): GitHubSyncConfig {
@@ -244,6 +265,121 @@ function parseRepositoryReference(repositoryInput: string): ParsedRepositoryRefe
   }
 }
 
+function normalizeGitHubIssueRecord(issue: GitHubApiIssueRecord, parentIssueId?: number): GitHubIssueRecord {
+  return {
+    id: issue.id,
+    number: issue.number,
+    title: issue.title,
+    body: issue.body ?? null,
+    htmlUrl: issue.html_url,
+    state: issue.state,
+    parentIssueId
+  };
+}
+
+async function getParentIssue(
+  octokit: Octokit,
+  repository: ParsedRepositoryReference,
+  issueNumber: number,
+  parentCache: Map<number, GitHubIssueRecord | null>
+): Promise<GitHubIssueRecord | null> {
+  if (parentCache.has(issueNumber)) {
+    return parentCache.get(issueNumber) ?? null;
+  }
+
+  try {
+    const response = await octokit.rest.issues.getParent({
+      owner: repository.owner,
+      repo: repository.repo,
+      issue_number: issueNumber,
+      headers: {
+        accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': GITHUB_API_VERSION
+      }
+    });
+    const parentIssue = normalizeGitHubIssueRecord(response.data as GitHubApiIssueRecord);
+    parentCache.set(issueNumber, parentIssue);
+    return parentIssue;
+  } catch (error) {
+    const status = getErrorStatus(error);
+    if (status === 404 || status === 410) {
+      parentCache.set(issueNumber, null);
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+async function enrichIssueWithParentChain(
+  octokit: Octokit,
+  repository: ParsedRepositoryReference,
+  startingIssue: GitHubIssueRecord,
+  issuesById: Map<number, GitHubIssueRecord>,
+  parentCache: Map<number, GitHubIssueRecord | null>
+): Promise<void> {
+  const visited = new Set<number>();
+  let current = startingIssue;
+
+  while (!visited.has(current.id)) {
+    visited.add(current.id);
+
+    const parentIssue = await getParentIssue(octokit, repository, current.number, parentCache);
+    if (!parentIssue) {
+      return;
+    }
+
+    current.parentIssueId = parentIssue.id;
+
+    const existingParent = issuesById.get(parentIssue.id);
+    if (existingParent) {
+      current = existingParent;
+      continue;
+    }
+
+    issuesById.set(parentIssue.id, parentIssue);
+    current = parentIssue;
+  }
+}
+
+function sortIssuesForImport(issues: GitHubIssueRecord[]): GitHubIssueRecord[] {
+  const issuesById = new Map(issues.map((issue) => [issue.id, issue]));
+  const depthCache = new Map<number, number>();
+
+  const getDepth = (issue: GitHubIssueRecord, lineage = new Set<number>()): number => {
+    const cachedDepth = depthCache.get(issue.id);
+    if (cachedDepth !== undefined) {
+      return cachedDepth;
+    }
+
+    if (!issue.parentIssueId || lineage.has(issue.id)) {
+      depthCache.set(issue.id, 0);
+      return 0;
+    }
+
+    const parentIssue = issuesById.get(issue.parentIssueId);
+    if (!parentIssue) {
+      depthCache.set(issue.id, 0);
+      return 0;
+    }
+
+    const nextLineage = new Set(lineage);
+    nextLineage.add(issue.id);
+    const depth = getDepth(parentIssue, nextLineage) + 1;
+    depthCache.set(issue.id, depth);
+    return depth;
+  };
+
+  return [...issues].sort((left, right) => {
+    const depthDifference = getDepth(left) - getDepth(right);
+    if (depthDifference !== 0) {
+      return depthDifference;
+    }
+
+    return left.number - right.number;
+  });
+}
+
 async function listRepositoryIssues(octokit: Octokit, repositoryUrl: string): Promise<GitHubIssueRecord[]> {
   const parsed = parseRepositoryReference(repositoryUrl);
   if (!parsed) {
@@ -254,22 +390,41 @@ async function listRepositoryIssues(octokit: Octokit, repositoryUrl: string): Pr
     owner: parsed.owner,
     repo: parsed.repo,
     state: 'open',
-    per_page: 100
+    per_page: 100,
+    headers: {
+      accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': GITHUB_API_VERSION
+    }
   });
 
-  return issues
-    .filter((issue) => !('pull_request' in issue))
-    .map((issue) => ({
-      id: issue.id,
-      number: issue.number,
-      title: issue.title,
-      body: issue.body ?? null,
-      htmlUrl: issue.html_url,
-      state: issue.state
-    }));
+  const issuesById = new Map<number, GitHubIssueRecord>();
+  const rootIssues: GitHubIssueRecord[] = [];
+
+  for (const issue of issues) {
+    if ('pull_request' in issue) {
+      continue;
+    }
+
+    const normalizedIssue = normalizeGitHubIssueRecord(issue as GitHubApiIssueRecord);
+    issuesById.set(normalizedIssue.id, normalizedIssue);
+    rootIssues.push(normalizedIssue);
+  }
+
+  const parentCache = new Map<number, GitHubIssueRecord | null>();
+
+  for (const issue of rootIssues) {
+    await enrichIssueWithParentChain(octokit, parsed, issue, issuesById, parentCache);
+  }
+
+  return sortIssuesForImport([...issuesById.values()]);
 }
 
-async function createPaperclipIssue(ctx: Parameters<Parameters<typeof definePlugin>[0]['setup']>[0], mapping: RepositoryMapping, issue: GitHubIssueRecord) {
+async function createPaperclipIssue(
+  ctx: Parameters<Parameters<typeof definePlugin>[0]['setup']>[0],
+  mapping: RepositoryMapping,
+  issue: GitHubIssueRecord,
+  parentId?: string
+) {
   if (!mapping.companyId || !mapping.paperclipProjectId) {
     throw new Error(`Mapping ${mapping.id} is missing resolved Paperclip project identifiers.`);
   }
@@ -286,9 +441,76 @@ async function createPaperclipIssue(ctx: Parameters<Parameters<typeof definePlug
   return ctx.issues.create({
     companyId: mapping.companyId,
     projectId: mapping.paperclipProjectId,
+    parentId,
     title,
     description
   });
+}
+
+async function ensurePaperclipIssueImported(
+  ctx: Parameters<Parameters<typeof definePlugin>[0]['setup']>[0],
+  mapping: RepositoryMapping,
+  issue: GitHubIssueRecord,
+  issuesById: Map<number, GitHubIssueRecord>,
+  importRegistryByIssueId: Map<number, ImportedIssueRecord>,
+  nextRegistry: ImportedIssueRecord[],
+  ensuredPaperclipIssueIds: Map<number, string>,
+  createdIssueIds: Set<number>,
+  skippedIssueIds: Set<number>,
+  lineage = new Set<number>()
+): Promise<string> {
+  const ensuredPaperclipIssueId = ensuredPaperclipIssueIds.get(issue.id);
+  if (ensuredPaperclipIssueId) {
+    return ensuredPaperclipIssueId;
+  }
+
+  const importedIssue = importRegistryByIssueId.get(issue.id);
+  if (importedIssue) {
+    skippedIssueIds.add(issue.id);
+    ensuredPaperclipIssueIds.set(issue.id, importedIssue.paperclipIssueId);
+    return importedIssue.paperclipIssueId;
+  }
+
+  if (lineage.has(issue.id)) {
+    throw new Error(`Detected a GitHub sub-issue cycle while importing issue #${issue.number}.`);
+  }
+
+  let parentPaperclipIssueId: string | undefined;
+  if (issue.parentIssueId) {
+    const parentIssue = issuesById.get(issue.parentIssueId);
+    if (parentIssue) {
+      const nextLineage = new Set(lineage);
+      nextLineage.add(issue.id);
+      parentPaperclipIssueId = await ensurePaperclipIssueImported(
+        ctx,
+        mapping,
+        parentIssue,
+        issuesById,
+        importRegistryByIssueId,
+        nextRegistry,
+        ensuredPaperclipIssueIds,
+        createdIssueIds,
+        skippedIssueIds,
+        nextLineage
+      );
+    } else {
+      parentPaperclipIssueId = importRegistryByIssueId.get(issue.parentIssueId)?.paperclipIssueId;
+    }
+  }
+
+  const createdIssue = await createPaperclipIssue(ctx, mapping, issue, parentPaperclipIssueId);
+  const registryRecord = {
+    mappingId: mapping.id,
+    githubIssueId: issue.id,
+    paperclipIssueId: createdIssue.id,
+    importedAt: new Date().toISOString()
+  };
+
+  nextRegistry.push(registryRecord);
+  importRegistryByIssueId.set(issue.id, registryRecord);
+  ensuredPaperclipIssueIds.set(issue.id, createdIssue.id);
+  createdIssueIds.add(issue.id);
+  return createdIssue.id;
 }
 
 async function getResolvedConfig(ctx: Parameters<Parameters<typeof definePlugin>[0]['setup']>[0]): Promise<GitHubSyncConfig> {
@@ -314,7 +536,7 @@ async function validateGithubToken(token: string): Promise<TokenValidationResult
       login: response.data.login
     };
   } catch (error) {
-    const status = typeof error === 'object' && error && 'status' in error ? (error as { status?: unknown }).status : undefined;
+    const status = getErrorStatus(error);
 
     if (status === 401 || status === 403) {
       throw new Error('GitHub rejected this token. Check that it is valid and has API access.');
@@ -407,24 +629,34 @@ async function performSync(ctx: Parameters<Parameters<typeof definePlugin>[0]['s
   try {
     for (const mapping of mappings) {
       const issues = await listRepositoryIssues(octokit, mapping.repositoryUrl);
+      const issuesById = new Map(issues.map((issue) => [issue.id, issue]));
+      const importRegistryByIssueId = new Map(
+        nextRegistry
+          .filter((entry) => entry.mappingId === mapping.id)
+          .map((entry) => [entry.githubIssueId, entry])
+      );
+      const ensuredPaperclipIssueIds = new Map<number, string>();
+      const createdIssueIds = new Set<number>();
+      const skippedIssueIds = new Set<number>();
+
       syncedIssuesCount += issues.length;
 
       for (const issue of issues) {
-        const alreadyImported = nextRegistry.find((entry) => entry.mappingId === mapping.id && entry.githubIssueId === issue.id);
-        if (alreadyImported) {
-          skippedIssuesCount += 1;
-          continue;
-        }
-
-        const createdIssue = await createPaperclipIssue(ctx, mapping, issue);
-        createdIssuesCount += 1;
-        nextRegistry.push({
-          mappingId: mapping.id,
-          githubIssueId: issue.id,
-          paperclipIssueId: createdIssue.id,
-          importedAt: new Date().toISOString()
-        });
+        await ensurePaperclipIssueImported(
+          ctx,
+          mapping,
+          issue,
+          issuesById,
+          importRegistryByIssueId,
+          nextRegistry,
+          ensuredPaperclipIssueIds,
+          createdIssueIds,
+          skippedIssueIds
+        );
       }
+
+      createdIssuesCount += createdIssueIds.size;
+      skippedIssuesCount += skippedIssueIds.size;
     }
 
     const next = {

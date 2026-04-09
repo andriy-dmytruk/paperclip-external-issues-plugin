@@ -28,6 +28,8 @@ The plugin MUST persist repository mappings and sync state in plugin state.
 - The plugin MUST declare a scheduled job that ticks every minute and only performs a scheduled sync when the saved frequency is due.
 - The sync flow MUST fetch open GitHub issues from every configured repository.
 - The sync flow MUST create one Paperclip issue per imported GitHub issue when the target mapping has a resolved Paperclip project identifier.
+- When an imported GitHub issue is a sub-issue, the sync flow MUST create it as a Paperclip child issue.
+- When an open GitHub sub-issue has a parent issue that is not already imported, the sync flow MUST import the missing parent chain first so the Paperclip child relationship can be preserved.
 - Repeated sync runs MUST skip issues that were already imported for the same mapping.
 
 ## Project binding behavior

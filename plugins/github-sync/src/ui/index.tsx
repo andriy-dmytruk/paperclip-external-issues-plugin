@@ -421,6 +421,10 @@ const PAGE_STYLES = `
   flex-wrap: wrap;
 }
 
+.ghsync__section-footer {
+  justify-content: flex-end;
+}
+
 .ghsync__connected,
 .ghsync__locked,
 .ghsync__sync-summary,
@@ -1476,13 +1480,11 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
   const tokenBannerLabel = tokenStatus === 'valid' ? 'Token valid' : tokenStatus === 'invalid' ? 'Token invalid' : 'Token required';
   const tokenBadgeLabel = tokenStatus === 'valid' ? 'Valid' : tokenStatus === 'invalid' ? 'Invalid' : 'Required';
   const tokenDescription =
-    tokenStatus === 'valid'
-      ? validatedLogin
-        ? `Authenticated as ${validatedLogin}. Stored as a company secret.`
-        : 'Validated with GitHub and stored as a company secret.'
-      : tokenStatus === 'invalid'
+    tokenStatus === 'invalid'
         ? 'GitHub rejected the last token. Save a valid token to continue.'
-        : 'Save a token once, then get it out of the way.';
+        : tokenStatus === 'required'
+          ? 'Add a token to continue.'
+          : null;
   const repositoriesUnlocked = tokenStatus === 'valid';
   const savedMappingsSource = settings.data ? settings.data.mappings ?? [] : form.mappings;
   const savedMappings = getComparableMappings(savedMappingsSource);
@@ -1617,7 +1619,7 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
       setTokenDraft('');
       toast({
         title: `Authenticated as ${validation.login}`,
-        body: 'GitHub token valid and stored as a company secret.',
+        body: 'Token saved.',
         tone: 'success'
       });
 
@@ -1769,7 +1771,7 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
       <section className="ghsync__header">
         <div className="ghsync__header-copy">
           <h2>GitHub Sync settings</h2>
-          <p>Validate a GitHub token first. Repositories and sync stay locked until GitHub access is valid.</p>
+          <p>Add a token to get started.</p>
         </div>
         <span className={`ghsync__badge ${getToneClass(tokenTone)}`}>
           <span className="ghsync__badge-dot" aria-hidden="true" />
@@ -1781,7 +1783,6 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
         <section className="ghsync__card">
           <div className="ghsync__card-header">
             <h3>Connect GitHub</h3>
-            <p>The token is the only prerequisite. After that, the rest of this page stays compact.</p>
           </div>
 
           {settings.loading ? <p className="ghsync__loading">Loading saved settings…</p> : null}
@@ -1790,7 +1791,7 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
             <div className="ghsync__section-head">
               <div className="ghsync__section-copy">
                 <h4>GitHub access</h4>
-                <p>{tokenDescription}</p>
+                {tokenDescription ? <p>{tokenDescription}</p> : null}
               </div>
               <span className={`ghsync__badge ${getToneClass(tokenTone)}`}>
                 {tokenBadgeLabel}
@@ -1816,7 +1817,6 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
                 </div>
 
                 <div className="ghsync__actions">
-                  <p className="ghsync__hint">We validate the token with the GitHub API before saving it as a company secret.</p>
                   <div className="ghsync__button-row">
                     {hasSavedToken ? (
                       <button
@@ -1836,7 +1836,7 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
                       className="ghsync__button ghsync__button--primary"
                       disabled={!canSaveToken}
                     >
-                      {submittingToken ? 'Validating…' : 'Validate & save token'}
+                      {submittingToken ? 'Saving…' : 'Save token'}
                     </button>
                   </div>
                 </div>
@@ -1844,8 +1844,8 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
             ) : (
               <div className="ghsync__connected">
                 <div>
-                  <strong>{validatedLogin ? `Authenticated as ${validatedLogin}` : 'GitHub token valid'}</strong>
-                  <span>{validatedLogin ? 'Validated with GitHub and stored as a company secret.' : 'Validated with GitHub and stored as a company secret.'}</span>
+                  <strong>{validatedLogin ? `Authenticated as ${validatedLogin}` : 'Token ready'}</strong>
+                  <span>Ready.</span>
                 </div>
                 <button
                   type="button"
@@ -1866,7 +1866,6 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
             <div className="ghsync__section-head">
               <div className="ghsync__section-copy">
                 <h4>Repositories</h4>
-                <p>{repositoriesUnlocked ? 'Map each GitHub repository to a Paperclip project. Save changes from the Sync section below.' : 'Unlocks after the token is valid.'}</p>
               </div>
               <span className={`ghsync__badge ${getToneClass(!repositoriesUnlocked ? 'neutral' : savedMappingCount > 0 ? 'success' : 'info')}`}>
                 {!repositoriesUnlocked ? 'Locked' : savedMappingCount > 0 ? `${savedMappingCount} saved` : 'Open'}
@@ -1877,7 +1876,7 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
               <div className="ghsync__locked">
                 <div>
                   <strong>Repositories are locked</strong>
-                  <span>{tokenStatus === 'invalid' ? 'Save a valid GitHub token to continue.' : 'Validate the token to unlock repository mapping.'}</span>
+                  <span>Add a valid token first.</span>
                 </div>
                 <span className="ghsync__badge ghsync__badge--neutral">Locked</span>
               </div>
@@ -1892,7 +1891,6 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
                         <div className="ghsync__mapping-head">
                           <div className="ghsync__mapping-title">
                             <strong>Repository {index + 1}</strong>
-                            <span>{mapping.paperclipProjectId ? 'Linked project saved.' : 'One repository, one Paperclip project.'}</span>
                           </div>
                           {canRemove ? (
                             <button
@@ -1931,7 +1929,6 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
                               autoComplete="off"
                               readOnly={Boolean(mapping.paperclipProjectId)}
                             />
-                            {!mapping.paperclipProjectId ? <p className="ghsync__hint">A project with this name will be created if it does not exist.</p> : null}
                           </div>
                         </div>
                       </section>
@@ -1946,12 +1943,9 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
                       className="ghsync__button ghsync__button--secondary"
                       onClick={addMapping}
                     >
-                      Add repository
+                      Add another repository
                     </button>
                   </div>
-                  <p className="ghsync__note">
-                    {savedMappingCount > 0 ? `${savedMappingCount} saved. Use Sync below to save repository changes and cadence updates.` : 'Add at least one repository, then save setup from the Sync section below.'}
-                  </p>
                 </div>
               </div>
             )}
@@ -1961,7 +1955,6 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
             <div className="ghsync__section-head">
               <div className="ghsync__section-copy">
                 <h4>Sync</h4>
-                <p>{repositoriesUnlocked ? `Set the automatic sync cadence in minutes and save setup here. Manual sync stays available after at least one repository mapping is saved.` : 'Unlocks after the token is valid and repository setup is complete.'}</p>
               </div>
               <span className={`ghsync__badge ${getToneClass(syncStatus.tone)}`}>{syncStatus.label}</span>
             </div>
@@ -1970,13 +1963,13 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
               <div className="ghsync__locked">
                 <div>
                   <strong>Sync is locked</strong>
-                  <span>{tokenStatus === 'invalid' ? 'Save a valid GitHub token first.' : 'Validate the token first.'}</span>
+                  <span>Add a valid token first.</span>
                 </div>
                 <span className="ghsync__badge ghsync__badge--neutral">Locked</span>
               </div>
             ) : (
-              <div className="ghsync__stack">
-                <form className="ghsync__schedule-card" onSubmit={handleSaveSetup}>
+              <form className="ghsync__stack" onSubmit={handleSaveSetup}>
+                <div className="ghsync__schedule-card">
                   <div className="ghsync__field">
                     <label htmlFor="sync-frequency-minutes">Automatic sync cadence</label>
                     <input
@@ -1993,30 +1986,20 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
                       placeholder="15"
                     />
                     <p className={`ghsync__hint${scheduleFrequencyError ? ' ghsync__hint--error' : ''}`}>
-                      {scheduleFrequencyError ?? 'Enter minutes between automatic sync runs.'}
+                      {scheduleFrequencyError ?? 'Minutes between syncs.'}
                     </p>
                   </div>
 
                   <div className="ghsync__schedule-meta">
                     <strong>Auto-sync {scheduleDescription}</strong>
-                    <span>Save setup to persist repository mappings and cadence changes.</span>
-                    <div className="ghsync__button-row">
-                      <button
-                        type="submit"
-                        className="ghsync__button ghsync__button--primary"
-                        disabled={!canSaveSetup}
-                      >
-                        {submittingSetup ? 'Saving…' : 'Save setup'}
-                      </button>
-                    </div>
                   </div>
-                </form>
+                </div>
 
                 {!syncUnlocked ? (
                   <div className="ghsync__locked">
                     <div>
                       <strong>Manual sync is locked</strong>
-                      <span>Save at least one repository mapping to run sync manually.</span>
+                      <span>Save a repository first.</span>
                     </div>
                     <span className="ghsync__badge ghsync__badge--neutral">Locked</span>
                   </div>
@@ -2059,7 +2042,19 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
                     </div>
                   </>
                 )}
-              </div>
+
+                <div className="ghsync__section-footer">
+                  <div className="ghsync__button-row">
+                    <button
+                      type="submit"
+                      className="ghsync__button ghsync__button--primary"
+                      disabled={!canSaveSetup}
+                    >
+                      {submittingSetup ? 'Saving…' : 'Save setup'}
+                    </button>
+                  </div>
+                </div>
+              </form>
             )}
           </section>
         </section>
@@ -2067,7 +2062,6 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
         <aside className="ghsync__card">
           <div className="ghsync__card-header">
             <h3>Setup</h3>
-            <p>Only the blockers stay visible.</p>
           </div>
 
           <div className="ghsync__side-body">
@@ -2078,7 +2072,7 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
                   {tokenBadgeLabel}
                 </span>
               </div>
-              <span>{tokenStatus === 'valid' ? (validatedLogin ? `Authenticated as ${validatedLogin}.` : 'Validated and saved as a company secret.') : tokenStatus === 'invalid' ? 'The last token validation failed.' : 'Needed before anything else.'}</span>
+              <span>{tokenStatus === 'valid' ? (validatedLogin ? `Authenticated as ${validatedLogin}.` : 'Ready.') : tokenStatus === 'invalid' ? 'Needs attention.' : 'Required.'}</span>
             </div>
 
             <div className="ghsync__check">
@@ -2088,7 +2082,7 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
                   {!repositoriesUnlocked ? 'Locked' : savedMappingCount > 0 ? 'Ready' : 'Open'}
                 </span>
               </div>
-              <span>{!repositoriesUnlocked ? 'Opens after token setup.' : savedMappingCount > 0 ? `${savedMappingCount} saved.` : 'Add and save a repository.'}</span>
+              <span>{!repositoriesUnlocked ? 'Requires a token.' : savedMappingCount > 0 ? `${savedMappingCount} saved.` : 'Add a repository.'}</span>
             </div>
 
             <div className="ghsync__check">
@@ -2096,7 +2090,7 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
                 <strong>Sync</strong>
                 <span className={`ghsync__badge ${getToneClass(syncStatus.tone)}`}>{syncStatus.label}</span>
               </div>
-              <span>{!syncUnlocked ? (tokenStatus === 'valid' ? `Waiting for a saved repository. Auto-sync is set to ${scheduleDescription}.` : 'Waiting for valid GitHub access.') : form.syncState.checkedAt ? `Auto-sync ${scheduleDescription}. Last run ${lastSync}.` : `Auto-sync ${scheduleDescription}. Ready to run on demand.`}</span>
+              <span>{!syncUnlocked ? (tokenStatus === 'valid' ? 'Save a repository to enable sync.' : 'Requires a token.') : `Auto-sync ${scheduleDescription}.`}</span>
             </div>
 
             <div className="ghsync__detail-list">
