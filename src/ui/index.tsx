@@ -3496,7 +3496,7 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
     savedMappingCount
   });
   const syncSectionDescription = hasCompanyContext
-    ? `Manual sync on this page runs only ${currentCompanyName}. Automatic cadence is shared across GitHub Sync.`
+    ? `Manual sync on this page runs only for ${currentCompanyName}. Automatic cadence is shared across GitHub Sync.`
     : 'This view shows the shared cadence and latest sync state across the whole plugin instance.';
   const syncSummaryPrimaryText =
     syncProgress?.title ??
