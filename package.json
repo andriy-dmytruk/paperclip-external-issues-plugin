@@ -46,11 +46,11 @@
     "react": "^19.2.0"
   },
   "devDependencies": {
-    "@types/node": "^24.5.2",
+    "@types/node": "24.12.2",
     "@types/react": "^19.2.2",
-    "esbuild": "^0.25.3",
-    "playwright": "^1.58.0",
-    "tsx": "^4.20.6",
-    "typescript": "^5.9.2"
+    "esbuild": "0.25.12",
+    "playwright": "1.59.1",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3"
   }
 }
