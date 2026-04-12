@@ -5598,7 +5598,7 @@ test('worker repairs empty descriptions before GitHub status snapshot failures c
   }
 });
 
-test('worker maps GitHub issue and linked PR state onto Paperclip statuses while resetting commented issues back to todo', async () => {
+test('worker maps GitHub issue and linked PR state onto Paperclip statuses while resetting issues with trusted new comments back to todo', async () => {
   const harness = createTestHarness({
     manifest,
     config: {
@@ -5759,6 +5759,9 @@ test('worker maps GitHub issue and linked PR state onto Paperclip statuses while
       title: 'Reset on new comment',
       body: null,
       html_url: 'https://github.com/paperclipai/example-repo/issues/31',
+      user: {
+        login: 'issue-reporter-31'
+      },
       state: 'open',
       comments: 2
     },
@@ -5768,6 +5771,9 @@ test('worker maps GitHub issue and linked PR state onto Paperclip statuses while
       title: 'Commented backlog stays backlog',
       body: null,
       html_url: 'https://github.com/paperclipai/example-repo/issues/39',
+      user: {
+        login: 'issue-reporter-39'
+      },
       state: 'open',
       comments: 2
     },
@@ -5902,6 +5908,7 @@ test('worker maps GitHub issue and linked PR state onto Paperclip statuses while
   ]);
 
   const originalFetch = globalThis.fetch;
+  let backlogCommentIssueCommentRequests = 0;
 
   globalThis.fetch = async (input, init) => {
     const rawUrl = getRequestUrl(input);
@@ -5909,6 +5916,45 @@ test('worker maps GitHub issue and linked PR state onto Paperclip statuses while
 
     if (url.pathname === '/repos/paperclipai/example-repo/issues' && ['all', 'open'].includes(url.searchParams.get('state') ?? '')) {
       return jsonResponse(githubIssues);
+    }
+
+    if (url.pathname === '/repos/paperclipai/example-repo/issues/31/comments') {
+      return jsonResponse([
+        {
+          id: 3101,
+          body: 'Initial report',
+          user: {
+            login: 'someone-else'
+          }
+        },
+        {
+          id: 3102,
+          body: 'Additional details from the reporter',
+          user: {
+            login: 'issue-reporter-31'
+          }
+        }
+      ]);
+    }
+
+    if (url.pathname === '/repos/paperclipai/example-repo/issues/39/comments') {
+      backlogCommentIssueCommentRequests += 1;
+      return jsonResponse([
+        {
+          id: 3901,
+          body: 'Initial report',
+          user: {
+            login: 'someone-else'
+          }
+        },
+        {
+          id: 3902,
+          body: 'Reporter follow-up',
+          user: {
+            login: 'issue-reporter-39'
+          }
+        }
+      ]);
     }
 
     if (url.pathname === '/graphql') {
@@ -6031,7 +6077,7 @@ test('worker maps GitHub issue and linked PR state onto Paperclip statuses while
     );
     assert.match(
       statusTransitionComments.find((comment) => comment.issueId === commentedIssue.id)?.body ?? '',
-      /a new GitHub comment was added/
+      /a new GitHub comment from the issue author or a repository maintainer was added/
     );
     assert.doesNotMatch(
       statusTransitionComments.find((comment) => comment.issueId === commentedIssue.id)?.body ?? '',
@@ -6070,6 +6116,7 @@ test('worker maps GitHub issue and linked PR state onto Paperclip statuses while
     assert.equal(importRegistry.find((entry) => entry.githubIssueId === 3002)?.lastSeenCommentCount, 2);
     assert.equal(importRegistry.find((entry) => entry.githubIssueId === 3003)?.lastSeenCommentCount, 2);
     assert.equal(importRegistry.find((entry) => entry.githubIssueId === 3010)?.githubIssueNumber, 38);
+    assert.equal(backlogCommentIssueCommentRequests, 0);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -6558,8 +6605,30 @@ test('worker uses the local Paperclip issue PATCH API for status transitions whe
           title: 'API transition issue',
           body: 'Body',
           html_url: 'https://github.com/paperclipai/example-repo/issues/41',
+          user: {
+            login: 'issue-reporter-41'
+          },
           state: 'open',
           comments: 2
+        }
+      ]);
+    }
+
+    if (url.pathname === '/repos/paperclipai/example-repo/issues/41/comments') {
+      return jsonResponse([
+        {
+          id: 41011,
+          body: 'Initial issue comment',
+          user: {
+            login: 'someone-else'
+          }
+        },
+        {
+          id: 41012,
+          body: 'Reporter follow-up',
+          user: {
+            login: 'issue-reporter-41'
+          }
         }
       ]);
     }
@@ -6623,7 +6692,10 @@ test('worker uses the local Paperclip issue PATCH API for status transitions whe
     assert.equal(directCommentCalls.length, 1);
     assert.equal(apiTransitionComments.length, 0);
     assert.match(directCommentCalls[0]?.body ?? '', /from `in progress` to `todo`/);
-    assert.match(directCommentCalls[0]?.body ?? '', /a new GitHub comment was added/);
+    assert.match(
+      directCommentCalls[0]?.body ?? '',
+      /a new GitHub comment from the issue author or a repository maintainer was added/
+    );
     assert.doesNotMatch(directCommentCalls[0]?.body ?? '', /paperclipai\/example-repo#41/);
 
     const annotation = await harness.getData<{
@@ -6752,8 +6824,30 @@ test('worker falls back to the SDK bridge when the local Paperclip status PATCH 
           title: 'HTML login status fallback',
           body: 'Body',
           html_url: 'https://github.com/paperclipai/example-repo/issues/42',
+          user: {
+            login: 'issue-reporter-42'
+          },
           state: 'open',
           comments: 2
+        }
+      ]);
+    }
+
+    if (url.pathname === '/repos/paperclipai/example-repo/issues/42/comments') {
+      return jsonResponse([
+        {
+          id: 42011,
+          body: 'Initial issue comment',
+          user: {
+            login: 'someone-else'
+          }
+        },
+        {
+          id: 42012,
+          body: 'Reporter follow-up',
+          user: {
+            login: 'issue-reporter-42'
+          }
         }
       ]);
     }
@@ -6821,6 +6915,237 @@ test('worker falls back to the SDK bridge when the local Paperclip status PATCH 
 
     const updatedIssue = await harness.ctx.issues.get(importedIssue.id, 'company-1');
     assert.equal(updatedIssue?.status, 'todo');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('worker only resets imported issues to todo for new comments from the issue author or repository maintainers', async () => {
+  const harness = createTestHarness({
+    manifest,
+    config: {
+      githubTokenRef: 'github-secret-ref'
+    }
+  });
+  await plugin.definition.setup(harness.ctx);
+
+  await harness.performAction('settings.saveRegistration', {
+    mappings: [
+      {
+        id: 'mapping-a',
+        repositoryUrl: 'paperclipai/example-repo',
+        paperclipProjectName: 'Engineering',
+        paperclipProjectId: 'project-1',
+        companyId: 'company-1'
+      }
+    ],
+    syncState: {
+      status: 'idle'
+    }
+  });
+
+  const originalUpdate = harness.ctx.issues.update;
+  const originalCreateComment = harness.ctx.issues.createComment;
+
+  const maintainerCommentIssue = await harness.ctx.issues.create({
+    companyId: 'company-1',
+    projectId: 'project-1',
+    title: 'Maintainer can reset'
+  });
+  await originalUpdate(maintainerCommentIssue.id, { status: 'in_progress' }, 'company-1');
+
+  const outsiderCommentIssue = await harness.ctx.issues.create({
+    companyId: 'company-1',
+    projectId: 'project-1',
+    title: 'Outsider cannot reset'
+  });
+  await originalUpdate(outsiderCommentIssue.id, { status: 'in_progress' }, 'company-1');
+
+  await harness.ctx.state.set(
+    {
+      scopeKind: 'instance',
+      stateKey: 'paperclip-github-plugin-import-registry'
+    },
+    [
+      {
+        mappingId: 'mapping-a',
+        githubIssueId: 4301,
+        githubIssueNumber: 43,
+        paperclipIssueId: maintainerCommentIssue.id,
+        importedAt: '2026-04-09T09:00:00.000Z',
+        lastSeenCommentCount: 1,
+        repositoryUrl: 'https://github.com/paperclipai/example-repo',
+        paperclipProjectId: 'project-1',
+        companyId: 'company-1'
+      },
+      {
+        mappingId: 'mapping-a',
+        githubIssueId: 4401,
+        githubIssueNumber: 44,
+        paperclipIssueId: outsiderCommentIssue.id,
+        importedAt: '2026-04-09T09:00:00.000Z',
+        lastSeenCommentCount: 1,
+        repositoryUrl: 'https://github.com/paperclipai/example-repo',
+        paperclipProjectId: 'project-1',
+        companyId: 'company-1'
+      }
+    ]
+  );
+
+  const transitionComments: Array<{ issueId: string; body: string }> = [];
+  harness.ctx.issues.createComment = async (issueId, body, companyId) => {
+    transitionComments.push({ issueId, body });
+    return originalCreateComment(issueId, body, companyId);
+  };
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input, init) => {
+    const rawUrl = getRequestUrl(input);
+    const url = new URL(rawUrl);
+
+    if (url.pathname === '/repos/paperclipai/example-repo/issues' && ['all', 'open'].includes(url.searchParams.get('state') ?? '')) {
+      return jsonResponse([
+        {
+          id: 4301,
+          number: 43,
+          title: 'Maintainer can reset',
+          body: null,
+          html_url: 'https://github.com/paperclipai/example-repo/issues/43',
+          user: {
+            login: 'external-reporter'
+          },
+          state: 'open',
+          comments: 2
+        },
+        {
+          id: 4401,
+          number: 44,
+          title: 'Outsider cannot reset',
+          body: null,
+          html_url: 'https://github.com/paperclipai/example-repo/issues/44',
+          user: {
+            login: 'another-reporter'
+          },
+          state: 'open',
+          comments: 2
+        }
+      ]);
+    }
+
+    if (url.pathname === '/repos/paperclipai/example-repo/issues/43/comments') {
+      return jsonResponse([
+        {
+          id: 43011,
+          body: 'Initial issue comment',
+          user: {
+            login: 'someone-else'
+          }
+        },
+        {
+          id: 43012,
+          body: 'Maintainer follow-up',
+          user: {
+            login: 'repo-maintainer'
+          }
+        }
+      ]);
+    }
+
+    if (url.pathname === '/repos/paperclipai/example-repo/issues/44/comments') {
+      return jsonResponse([
+        {
+          id: 44011,
+          body: 'Initial issue comment',
+          user: {
+            login: 'someone-else'
+          }
+        },
+        {
+          id: 44012,
+          body: 'Drive-by comment',
+          user: {
+            login: 'random-driveby'
+          }
+        }
+      ]);
+    }
+
+    if (url.pathname === '/repos/paperclipai/example-repo/collaborators/repo-maintainer/permission') {
+      return jsonResponse({
+        permission: 'admin',
+        role_name: 'maintain',
+        user: {
+          login: 'repo-maintainer'
+        }
+      });
+    }
+
+    if (url.pathname === '/repos/paperclipai/example-repo/collaborators/random-driveby/permission') {
+      return jsonResponse(
+        {
+          message: 'Not Found'
+        },
+        404
+      );
+    }
+
+    if (url.pathname === '/graphql') {
+      const { query, variables } = getGraphqlRequest(init);
+      const issueNumber = typeof variables.issueNumber === 'number' ? variables.issueNumber : undefined;
+
+      if (query.includes('query GitHubIssueParentRelationships')) {
+        return graphqlIssueParentRelationshipsResponse([
+          {
+            issueNumber: 43
+          },
+          {
+            issueNumber: 44
+          }
+        ]);
+      }
+
+      if (query.includes('query GitHubIssueStatusSnapshot') && issueNumber !== undefined) {
+        return graphqlResponse({
+          repository: {
+            issue: {
+              number: issueNumber,
+              state: 'OPEN',
+              stateReason: null,
+              comments: {
+                totalCount: 2
+              },
+              closedByPullRequestsReferences: {
+                pageInfo: {
+                  hasNextPage: false,
+                  endCursor: null
+                },
+                nodes: []
+              }
+            }
+          }
+        });
+      }
+    }
+
+    throw new Error(`Unexpected GitHub request: ${url.toString()}`);
+  };
+
+  try {
+    const sync = await harness.performAction('sync.runNow', {
+      waitForCompletion: true
+    }) as {
+      syncState: { status: string };
+    };
+
+    assert.equal(sync.syncState.status, 'success');
+    assert.equal((await harness.ctx.issues.get(maintainerCommentIssue.id, 'company-1'))?.status, 'todo');
+    assert.equal((await harness.ctx.issues.get(outsiderCommentIssue.id, 'company-1'))?.status, 'in_progress');
+    assert.equal(transitionComments.length, 1);
+    assert.equal(transitionComments[0]?.issueId, maintainerCommentIssue.id);
+    assert.match(
+      transitionComments[0]?.body ?? '',
+      /a new GitHub comment from the issue author or a repository maintainer was added/
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -7374,6 +7699,169 @@ test('worker pauses sync when GitHub rate limiting is hit and skips later manual
     assert.equal(secondAttempt.syncState.status, 'error');
     assert.equal(secondAttempt.syncState.errorDetails?.rateLimitResetAt, expectedResetAt);
     assert.equal(githubRequestCount, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('worker pauses sync when maintainer permission checks hit a GitHub rate limit', async () => {
+  const harness = createTestHarness({
+    manifest,
+    config: {
+      githubTokenRef: 'github-secret-ref'
+    }
+  });
+  await plugin.definition.setup(harness.ctx);
+
+  await harness.performAction('settings.saveRegistration', {
+    mappings: [
+      {
+        id: 'mapping-a',
+        repositoryUrl: 'paperclipai/example-repo',
+        paperclipProjectName: 'Engineering',
+        paperclipProjectId: 'project-1',
+        companyId: 'company-1'
+      }
+    ],
+    syncState: {
+      status: 'idle'
+    }
+  });
+
+  const importedIssue = await harness.ctx.issues.create({
+    companyId: 'company-1',
+    projectId: 'project-1',
+    title: 'Permission rate limit'
+  });
+  await harness.ctx.issues.update(importedIssue.id, { status: 'in_progress' }, 'company-1');
+
+  await harness.ctx.state.set(
+    {
+      scopeKind: 'instance',
+      stateKey: 'paperclip-github-plugin-import-registry'
+    },
+    [
+      {
+        mappingId: 'mapping-a',
+        githubIssueId: 4501,
+        githubIssueNumber: 45,
+        paperclipIssueId: importedIssue.id,
+        importedAt: '2026-04-09T09:00:00.000Z',
+        lastSeenCommentCount: 1,
+        repositoryUrl: 'https://github.com/paperclipai/example-repo',
+        paperclipProjectId: 'project-1',
+        companyId: 'company-1'
+      }
+    ]
+  );
+
+  const resetAtMs = Date.now() + 10 * 60_000;
+  const expectedResetAt = new Date(Math.floor(resetAtMs / 1_000) * 1_000).toISOString();
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async (input, init) => {
+    const rawUrl = getRequestUrl(input);
+    const url = new URL(rawUrl);
+
+    if (url.pathname === '/repos/paperclipai/example-repo/issues' && ['all', 'open'].includes(url.searchParams.get('state') ?? '')) {
+      return jsonResponse([
+        {
+          id: 4501,
+          number: 45,
+          title: 'Permission rate limit',
+          body: null,
+          html_url: 'https://github.com/paperclipai/example-repo/issues/45',
+          user: {
+            login: 'issue-reporter-45'
+          },
+          state: 'open',
+          comments: 2
+        }
+      ]);
+    }
+
+    if (url.pathname === '/repos/paperclipai/example-repo/issues/45/comments') {
+      return jsonResponse([
+        {
+          id: 45011,
+          body: 'Initial issue comment',
+          user: {
+            login: 'someone-else'
+          }
+        },
+        {
+          id: 45012,
+          body: 'Maintainer follow-up',
+          user: {
+            login: 'repo-maintainer'
+          }
+        }
+      ]);
+    }
+
+    if (url.pathname === '/repos/paperclipai/example-repo/collaborators/repo-maintainer/permission') {
+      return githubRateLimitedResponse({
+        resetAtMs,
+        resource: 'core'
+      });
+    }
+
+    if (url.pathname === '/graphql') {
+      const { query, variables } = getGraphqlRequest(init);
+      const issueNumber = typeof variables.issueNumber === 'number' ? variables.issueNumber : undefined;
+
+      if (query.includes('query GitHubIssueParentRelationships')) {
+        return graphqlIssueParentRelationshipsResponse([
+          {
+            issueNumber: 45
+          }
+        ]);
+      }
+
+      if (query.includes('query GitHubIssueStatusSnapshot') && issueNumber === 45) {
+        return graphqlResponse({
+          repository: {
+            issue: {
+              number: 45,
+              state: 'OPEN',
+              stateReason: null,
+              comments: {
+                totalCount: 2
+              },
+              closedByPullRequestsReferences: {
+                pageInfo: {
+                  hasNextPage: false,
+                  endCursor: null
+                },
+                nodes: []
+              }
+            }
+          }
+        });
+      }
+    }
+
+    throw new Error(`Unexpected GitHub request: ${url.toString()}`);
+  };
+
+  try {
+    const result = await harness.performAction('sync.runNow', {
+      waitForCompletion: true
+    }) as {
+      syncState: {
+        status: string;
+        message?: string;
+        errorDetails?: {
+          rateLimitResetAt?: string;
+          rateLimitResource?: string;
+        };
+      };
+    };
+
+    assert.equal(result.syncState.status, 'error');
+    assert.match(result.syncState.message ?? '', /rate limit reached/i);
+    assert.equal(result.syncState.errorDetails?.rateLimitResetAt, expectedResetAt);
+    assert.equal(result.syncState.errorDetails?.rateLimitResource, 'core');
   } finally {
     globalThis.fetch = originalFetch;
   }
