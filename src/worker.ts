@@ -276,6 +276,7 @@ interface GitHubSyncConfig {
   githubTokenRef?: string;
   githubToken?: string;
   paperclipBoardApiTokenRefs?: PaperclipBoardApiTokenRefs;
+  paperclipApiBaseUrl?: string;
 }
 
 interface ResolvedGitHubTokenSource {
@@ -2449,11 +2450,13 @@ function normalizeConfig(value: unknown): GitHubSyncConfig {
   const githubTokenRef = normalizeGitHubTokenRef(record.githubTokenRef);
   const githubToken = normalizeGitHubToken(record.githubToken);
   const paperclipBoardApiTokenRefs = normalizePaperclipBoardApiTokenRefs(record.paperclipBoardApiTokenRefs);
+  const paperclipApiBaseUrl = normalizePaperclipApiBaseUrl(record.paperclipApiBaseUrl);
 
   return {
     ...(githubTokenRef ? { githubTokenRef } : {}),
     ...(githubToken ? { githubToken } : {}),
-    ...(paperclipBoardApiTokenRefs ? { paperclipBoardApiTokenRefs } : {})
+    ...(paperclipBoardApiTokenRefs ? { paperclipBoardApiTokenRefs } : {}),
+    ...(paperclipApiBaseUrl ? { paperclipApiBaseUrl } : {})
   };
 }
 
@@ -2758,6 +2761,50 @@ function resolvePaperclipApiBaseUrl(...values: unknown[]): string | undefined {
   }
 
   return undefined;
+}
+
+function getConfiguredPaperclipApiBaseUrl(
+  settings: Pick<GitHubSyncSettings, 'paperclipApiBaseUrl'> | null | undefined,
+  config: Pick<GitHubSyncConfig, 'paperclipApiBaseUrl'> | null | undefined
+): string | undefined {
+  return resolvePaperclipApiBaseUrl(config?.paperclipApiBaseUrl, settings?.paperclipApiBaseUrl);
+}
+
+function resolveTrustedPaperclipApiBaseUrlInput(
+  value: unknown,
+  settings: Pick<GitHubSyncSettings, 'paperclipApiBaseUrl'> | null | undefined,
+  config: Pick<GitHubSyncConfig, 'paperclipApiBaseUrl'> | null | undefined
+): string | undefined {
+  const runtimePaperclipApiBaseUrl = getRuntimePaperclipApiBaseUrl();
+  if (runtimePaperclipApiBaseUrl) {
+    return runtimePaperclipApiBaseUrl;
+  }
+
+  const requestedPaperclipApiBaseUrl = normalizePaperclipApiBaseUrl(value);
+  const configuredPaperclipApiBaseUrl = normalizePaperclipApiBaseUrl(config?.paperclipApiBaseUrl);
+  const savedPaperclipApiBaseUrl = normalizePaperclipApiBaseUrl(settings?.paperclipApiBaseUrl);
+
+  if (!requestedPaperclipApiBaseUrl) {
+    return configuredPaperclipApiBaseUrl ?? savedPaperclipApiBaseUrl;
+  }
+
+  if (configuredPaperclipApiBaseUrl) {
+    if (requestedPaperclipApiBaseUrl !== configuredPaperclipApiBaseUrl) {
+      throw new Error(
+        'Paperclip API URL must match the trusted plugin config origin. Open GitHub Sync from the current Paperclip host and try again.'
+      );
+    }
+
+    return configuredPaperclipApiBaseUrl;
+  }
+
+  if (savedPaperclipApiBaseUrl && requestedPaperclipApiBaseUrl === savedPaperclipApiBaseUrl) {
+    return savedPaperclipApiBaseUrl;
+  }
+
+  throw new Error(
+    'Paperclip API URL is not trusted yet. Open GitHub Sync settings inside Paperclip from the current host before retrying.'
+  );
 }
 
 function normalizeSettings(value: unknown): GitHubSyncSettings {
@@ -6434,9 +6481,15 @@ async function resolvePaperclipApiAuthTokens(
   return tokensByCompanyId;
 }
 
-async function resolveGithubToken(ctx: PluginSetupContext): Promise<string> {
-  const settings = normalizeSettings(await ctx.state.get(SETTINGS_SCOPE));
-  const config = await getResolvedConfig(ctx);
+async function resolveGithubToken(
+  ctx: PluginSetupContext,
+  options: {
+    settings?: Pick<GitHubSyncSettings, 'githubTokenRef'> | null | undefined;
+    config?: GitHubSyncConfig;
+  } = {}
+): Promise<string> {
+  const settings = options.settings ?? normalizeSettings(await ctx.state.get(SETTINGS_SCOPE));
+  const config = options.config ?? await getResolvedConfig(ctx);
   const configuredTokenSource = getConfiguredGithubTokenSource(settings, config);
   if (configuredTokenSource.secretRef) {
     return ctx.secrets.resolve(configuredTokenSource.secretRef);
@@ -7583,8 +7636,14 @@ async function startSync(
     return quickResult ?? await getActiveOrCurrentSyncState(ctx);
   }
 
-  const token = await resolveGithubToken(ctx).catch(() => '');
-  const persistedSettings = normalizeSettings(await ctx.state.get(SETTINGS_SCOPE));
+  const [config, persistedSettings] = await Promise.all([
+    getResolvedConfig(ctx),
+    ctx.state.get(SETTINGS_SCOPE).then((value) => normalizeSettings(value))
+  ]);
+  const token = await resolveGithubToken(ctx, {
+    config,
+    settings: persistedSettings
+  }).catch(() => '');
   let currentSettings = sanitizeSettingsForCurrentSetup(persistedSettings, {
     hasToken: Boolean(token.trim()),
     hasMappings: getSyncableMappings(persistedSettings.mappings).length > 0
@@ -7592,8 +7651,8 @@ async function startSync(
 
   const nextPaperclipApiBaseUrl =
     trigger === 'manual'
-      ? resolvePaperclipApiBaseUrl(options.paperclipApiBaseUrl, currentSettings.paperclipApiBaseUrl)
-      : resolvePaperclipApiBaseUrl(currentSettings.paperclipApiBaseUrl);
+      ? resolveTrustedPaperclipApiBaseUrlInput(options.paperclipApiBaseUrl, currentSettings, config)
+      : getConfiguredPaperclipApiBaseUrl(currentSettings, config);
 
   if (nextPaperclipApiBaseUrl !== currentSettings.paperclipApiBaseUrl) {
     currentSettings = {
@@ -8441,14 +8500,17 @@ const plugin = definePlugin({
       const normalizedSettings = normalizeSettings(saved);
       const config = await getResolvedConfig(ctx);
       const githubTokenRef = getConfiguredGithubTokenRef(normalizedSettings, config);
+      const paperclipApiBaseUrl = getConfiguredPaperclipApiBaseUrl(normalizedSettings, config);
       const githubTokenConfigured = hasConfiguredGithubToken(normalizedSettings, config);
       const configuredBoardTokenRef = getConfiguredPaperclipBoardApiTokenRef(config, requestedCompanyId);
       const savedBoardTokenRef = getSavedPaperclipBoardApiTokenRef(normalizedSettings, requestedCompanyId);
       const settingsWithResolvedToken = githubTokenRef === normalizedSettings.githubTokenRef
+        && paperclipApiBaseUrl === normalizedSettings.paperclipApiBaseUrl
         ? normalizedSettings
         : {
             ...normalizedSettings,
-            ...(githubTokenRef ? { githubTokenRef } : {})
+            ...(githubTokenRef ? { githubTokenRef } : {}),
+            ...(paperclipApiBaseUrl ? { paperclipApiBaseUrl } : {})
           };
       const settingsForResponse = sanitizeSettingsForCurrentSetup(settingsWithResolvedToken, {
         hasToken: githubTokenConfigured,
@@ -8531,7 +8593,10 @@ const plugin = definePlugin({
         mappings: mergedMappings,
         syncState: previous.syncState,
         scheduleFrequencyMinutes: 'scheduleFrequencyMinutes' in record ? record.scheduleFrequencyMinutes : previous.scheduleFrequencyMinutes,
-        paperclipApiBaseUrl: 'paperclipApiBaseUrl' in record ? record.paperclipApiBaseUrl : previous.paperclipApiBaseUrl,
+        paperclipApiBaseUrl:
+          'paperclipApiBaseUrl' in record
+            ? resolveTrustedPaperclipApiBaseUrlInput(record.paperclipApiBaseUrl, previous, config)
+            : getConfiguredPaperclipApiBaseUrl(previous, config),
         paperclipBoardApiTokenRefs: previous.paperclipBoardApiTokenRefs,
         ...(Object.keys(nextCompanyAdvancedSettingsByCompanyId).length > 0
           ? { companyAdvancedSettingsByCompanyId: nextCompanyAdvancedSettingsByCompanyId }

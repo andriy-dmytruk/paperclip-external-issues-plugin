@@ -3,10 +3,24 @@ export type PluginConfigBoardTokenRefs = Record<string, string>;
 export interface GitHubSyncPluginConfig extends Record<string, unknown> {
   githubTokenRef?: string;
   paperclipBoardApiTokenRefs?: PluginConfigBoardTokenRefs;
+  paperclipApiBaseUrl?: string;
 }
 
 function normalizeOptionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function normalizePaperclipApiBaseUrl(value: unknown): string | undefined {
+  const normalizedValue = normalizeOptionalString(value);
+  if (!normalizedValue) {
+    return undefined;
+  }
+
+  try {
+    return new URL(normalizedValue).origin;
+  } catch {
+    return undefined;
+  }
 }
 
 export function normalizePluginConfigBoardTokenRefs(value: unknown): PluginConfigBoardTokenRefs | undefined {
@@ -39,6 +53,7 @@ export function normalizePluginConfig(value: unknown): GitHubSyncPluginConfig {
   const record = { ...(value as Record<string, unknown>) };
   const githubTokenRef = normalizeOptionalString(record.githubTokenRef);
   const paperclipBoardApiTokenRefs = normalizePluginConfigBoardTokenRefs(record.paperclipBoardApiTokenRefs);
+  const paperclipApiBaseUrl = normalizePaperclipApiBaseUrl(record.paperclipApiBaseUrl);
 
   if (githubTokenRef) {
     record.githubTokenRef = githubTokenRef;
@@ -50,6 +65,12 @@ export function normalizePluginConfig(value: unknown): GitHubSyncPluginConfig {
     record.paperclipBoardApiTokenRefs = paperclipBoardApiTokenRefs;
   } else {
     delete record.paperclipBoardApiTokenRefs;
+  }
+
+  if (paperclipApiBaseUrl) {
+    record.paperclipApiBaseUrl = paperclipApiBaseUrl;
+  } else {
+    delete record.paperclipApiBaseUrl;
   }
 
   return record as GitHubSyncPluginConfig;
