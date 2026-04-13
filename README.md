@@ -199,6 +199,7 @@ If you want the seeded `CEO` agent used in manual verification to opt into Codex
 
 - Publishing is driven by `.github/workflows/release.yml`.
 - The npm publish job runs from a published GitHub Release.
+- The release job uses `actions/setup-node@v6` with Node `24`, which already satisfies npm trusted publishing requirements without an extra in-job npm self-upgrade step.
 - The published version is derived from the GitHub release tag rather than the committed `package.json` version.
 - Tags may be either `1.2.3` or `v1.2.3`; the workflow normalizes both to `1.2.3`.
 - During release, the package version is stamped from the tag before build and publish, and the built plugin manifest uses that same resolved version.
