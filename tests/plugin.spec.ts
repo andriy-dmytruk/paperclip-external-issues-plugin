@@ -9,7 +9,7 @@ import type { Agent, Project } from '@paperclipai/plugin-sdk';
 import { createTestHarness } from '@paperclipai/plugin-sdk/testing';
 
 import manifest from '../src/manifest.ts';
-import { requiresPaperclipBoardAccess, shouldShowPaperclipBoardAccessSettings } from '../src/paperclip-health.ts';
+import { requiresPaperclipBoardAccess } from '../src/paperclip-health.ts';
 import { normalizeCompanyAssigneeOptionsResponse } from '../src/ui/assignees.ts';
 import { fetchJson, fetchPaperclipHealth, resolveCliAuthPollUrl } from '../src/ui/http.ts';
 import { resolveInstalledGitHubSyncPluginId, resolvePluginSettingsHref } from '../src/ui/plugin-installation.ts';
@@ -2054,28 +2054,6 @@ test('fetchPaperclipHealth normalizes authenticated deployment metadata', async 
   }
 });
 
-test('shouldShowPaperclipBoardAccessSettings returns true for authenticated and local trusted deployments', () => {
-  assert.equal(
-    shouldShowPaperclipBoardAccessSettings({
-      deploymentMode: 'authenticated'
-    }),
-    true
-  );
-  assert.equal(
-    shouldShowPaperclipBoardAccessSettings({
-      deploymentMode: 'local_trusted'
-    }),
-    true
-  );
-  assert.equal(
-    shouldShowPaperclipBoardAccessSettings({
-      deploymentMode: 'unauthenticated'
-    }),
-    false
-  );
-  assert.equal(shouldShowPaperclipBoardAccessSettings(null), false);
-});
-
 test('fetchPaperclipHealth returns null when the Paperclip health endpoint is unavailable', async () => {
   const originalFetch = globalThis.fetch;
 
@@ -2090,7 +2068,7 @@ test('fetchPaperclipHealth returns null when the Paperclip health endpoint is un
   }
 });
 
-test('mergePluginConfig preserves existing config while merging company-scoped token refs by company', () => {
+test('mergePluginConfig preserves existing config while merging token and board access refs by company', () => {
   const result = mergePluginConfig(
     {
       githubTokenRefs: {
@@ -2188,7 +2166,6 @@ test('manifest exposes GitHub Sync page, sidebar, dashboard, and settings UI met
   assert.equal(commentAnnotationSlot?.exportName, 'GitHubSyncCommentAnnotation');
   assert.equal(globalToolbarSlot?.exportName, 'GitHubSyncGlobalToolbarButton');
   assert.equal(entityToolbarSlot?.exportName, 'GitHubSyncEntityToolbarButton');
-  assert.deepEqual(entityToolbarSlot?.entityTypes, ['project']);
 });
 
 test('project.pullRequests.page returns live GitHub pull request summaries for the mapped repository', async () => {
@@ -5521,6 +5498,76 @@ test('worker scopes global toolbar sync state to the requested company', async (
   assert.equal(companyThreeState.message, 'No GitHub repositories are mapped for this company.');
 });
 
+test('worker scopes toolbar sync status to the requested company', async () => {
+  const harness = createTestHarness({
+    manifest,
+    config: {
+      githubTokenRef: 'github-secret-ref'
+    }
+  });
+  await plugin.definition.setup(harness.ctx);
+
+  await harness.ctx.state.set(
+    {
+      scopeKind: 'instance',
+      stateKey: 'paperclip-github-plugin-settings'
+    },
+    {
+      mappings: [
+        {
+          id: 'mapping-a',
+          repositoryUrl: 'paperclipai/example-repo',
+          paperclipProjectName: 'Engineering',
+          paperclipProjectId: 'project-1',
+          companyId: 'company-1'
+        },
+        {
+          id: 'mapping-b',
+          repositoryUrl: 'paperclipai/another-repo',
+          paperclipProjectName: 'Operations',
+          paperclipProjectId: 'project-2',
+          companyId: 'company-2'
+        }
+      ],
+      syncStateByCompanyId: {
+        'company-1': {
+          status: 'running',
+          message: 'Syncing company one',
+          checkedAt: '2026-04-09T10:00:00.000Z'
+        },
+        'company-2': {
+          status: 'success',
+          message: 'Company two synced',
+          checkedAt: '2026-04-09T11:00:00.000Z'
+        }
+      },
+      updatedAt: '2026-04-09T11:00:00.000Z'
+    }
+  );
+
+  const companyOneState = await harness.getData<{
+    syncState: {
+      status?: string;
+      message?: string;
+    };
+  }>('sync.toolbarState', {
+    companyId: 'company-1'
+  });
+  const companyTwoState = await harness.getData<{
+    syncState: {
+      status?: string;
+      message?: string;
+    };
+  }>('sync.toolbarState', {
+    companyId: 'company-2'
+  });
+
+  assert.equal(companyOneState.syncState.status, 'running');
+  assert.equal(companyOneState.syncState.message, 'Syncing company one');
+  assert.equal(companyTwoState.syncState.status, 'success');
+  assert.equal(companyTwoState.syncState.message, 'Company two synced');
+});
+
 test('worker uses the saved githubTokenRef fallback for toolbar state when config is stale', async () => {
   const harness = createTestHarness({ manifest });
   await plugin.definition.setup(harness.ctx);
@@ -5552,44 +5599,6 @@ test('worker uses the saved githubTokenRef fallback for toolbar state when confi
   assert.equal(settingsResult.githubTokenConfigured, true);
   assert.equal(globalState.canRun, true);
   assert.equal(globalState.message, 'Run a GitHub sync across every saved repository mapping.');
-});
-
-test('worker uses the saved company-scoped githubTokenRef fallback for toolbar state when config is stale', async () => {
-  const harness = createTestHarness({ manifest });
-  await plugin.definition.setup(harness.ctx);
-
-  await harness.performAction('settings.saveRegistration', {
-    companyId: 'company-1',
-    githubTokenRef: 'github-secret-ref',
-    mappings: [
-      {
-        id: 'mapping-a',
-        repositoryUrl: 'paperclipai/example-repo',
-        paperclipProjectName: 'Engineering',
-        paperclipProjectId: 'project-1',
-        companyId: 'company-1'
-      }
-    ],
-    syncState: {
-      status: 'idle'
-    }
-  });
-
-  const settingsResult = await harness.getData<{
-    githubTokenConfigured?: boolean;
-  }>('settings.registration', {
-    companyId: 'company-1'
-  });
-  const companyState = await harness.getData<{
-    canRun: boolean;
-    message?: string;
-  }>('sync.toolbarState', {
-    companyId: 'company-1'
-  });
-
-  assert.equal(settingsResult.githubTokenConfigured, true);
-  assert.equal(companyState.canRun, true);
-  assert.equal(companyState.message, 'Run a GitHub sync across every saved repository mapping for this company.');
 });
 
 test('worker issue.githubDetails returns issue-scoped GitHub detail payloads', async () => {
@@ -5773,7 +5782,6 @@ test('worker filters issue-scoped GitHub link records even when entities.list ig
     issueId: secondIssue.id
   });
   const toolbarState = await harness.getData<{
-    visible: boolean;
     label: string;
   }>('sync.toolbarState', {
     companyId: 'company-1',
@@ -5783,7 +5791,6 @@ test('worker filters issue-scoped GitHub link records even when entities.list ig
 
   assert.equal(details?.paperclipIssueId, secondIssue.id);
   assert.equal(details?.githubIssueNumber, 202);
-  assert.equal(toolbarState.visible, false);
   assert.equal(toolbarState.label, 'Sync #202');
 });
 
@@ -6374,6 +6381,46 @@ test('worker saves a configured schedule frequency alongside mappings', async ()
   assert.deepEqual(result.mappings, []);
 });
 
+test('worker scopes the saved schedule frequency to the requested company', async () => {
+  const harness = createTestHarness({ manifest });
+  await plugin.definition.setup(harness.ctx);
+
+  await harness.performAction('settings.saveRegistration', {
+    companyId: 'company-1',
+    scheduleFrequencyMinutes: 17
+  });
+  await harness.performAction('settings.saveRegistration', {
+    companyId: 'company-2',
+    scheduleFrequencyMinutes: 29
+  });
+
+  const companyOneResult = await harness.getData<{
+    scheduleFrequencyMinutes: number;
+  }>('settings.registration', {
+    companyId: 'company-1'
+  });
+  const companyTwoResult = await harness.getData<{
+    scheduleFrequencyMinutes: number;
+  }>('settings.registration', {
+    companyId: 'company-2'
+  });
+
+  assert.equal(companyOneResult.scheduleFrequencyMinutes, 17);
+  assert.equal(companyTwoResult.scheduleFrequencyMinutes, 29);
+
+  const savedSettings = harness.getState({
+    scopeKind: 'instance',
+    stateKey: 'paperclip-github-plugin-settings'
+  }) as {
+    scheduleFrequencyMinutesByCompanyId?: Record<string, number>;
+  };
+
+  assert.deepEqual(savedSettings.scheduleFrequencyMinutesByCompanyId, {
+    'company-1': 17,
+    'company-2': 29
+  });
+});
+
 test('settings.registration returns a cumulative synced issue total deduped by GitHub issue', async () => {
   const harness = createTestHarness({
     manifest,
@@ -6458,7 +6505,9 @@ test('settings.registration reports a configured token without resolving the sav
   const harness = createTestHarness({
     manifest,
     config: {
-      githubTokenRef: 'github-secret-ref'
+      githubTokenRefs: {
+        'company-1': 'github-secret-ref'
+      }
     }
   });
   await plugin.definition.setup(harness.ctx);
@@ -6472,69 +6521,60 @@ test('settings.registration reports a configured token without resolving the sav
   const result = await harness.getData<{
     githubTokenConfigured?: boolean;
     syncState?: { status?: string };
-  }>('settings.registration');
+  }>('settings.registration', {
+    companyId: 'company-1'
+  });
 
   assert.equal(result.githubTokenConfigured, true);
   assert.equal(result.syncState?.status, 'idle');
   assert.equal(resolveCount, 0);
 });
 
-test('settings.registration reports a company-scoped configured token without resolving the saved secret', async () => {
-  const previousPaperclipHome = process.env.PAPERCLIP_HOME;
-  const isolatedPaperclipHome = await mkdtemp(join(tmpdir(), 'paperclip-github-plugin-settings-registration-'));
-  const harness = createTestHarness({
-    manifest,
-    config: {
-      githubTokenRefs: {
-        'company-1': 'github-secret-ref'
-      }
+test('settings.registration reports company-specific GitHub token setup without resolving the saved secret', async () => {
+  const harness = createTestHarness({ manifest });
+  await plugin.definition.setup(harness.ctx);
+
+  let resolveCount = 0;
+  harness.ctx.secrets.resolve = async () => {
+    resolveCount += 1;
+    throw new Error('GitHub token resolution should not happen for settings data.');
+  };
+
+  await harness.performAction('settings.saveRegistration', {
+    companyId: 'company-1',
+    githubTokenRefs: {
+      'company-1': 'github-secret-ref-1'
     }
   });
-  process.env.PAPERCLIP_HOME = isolatedPaperclipHome;
 
-  try {
-    await plugin.definition.setup(harness.ctx);
+  const companyOneResult = await harness.getData<{
+    githubTokenConfigured?: boolean;
+    githubTokenLogin?: string;
+  }>('settings.registration', {
+    companyId: 'company-1'
+  });
+  const companyTwoResult = await harness.getData<{
+    githubTokenConfigured?: boolean;
+    githubTokenLogin?: string;
+  }>('settings.registration', {
+    companyId: 'company-2'
+  });
 
-    let resolveCount = 0;
-    harness.ctx.secrets.resolve = async () => {
-      resolveCount += 1;
-      throw new Error('Rate limit exceeded for secret resolution');
-    };
-
-    const companyOneResult = await harness.getData<{
-      githubTokenConfigured?: boolean;
-      syncState?: { status?: string };
-    }>('settings.registration', {
-      companyId: 'company-1'
-    });
-    const companyTwoResult = await harness.getData<{
-      githubTokenConfigured?: boolean;
-    }>('settings.registration', {
-      companyId: 'company-2'
-    });
-
-    assert.equal(companyOneResult.githubTokenConfigured, true);
-    assert.equal(companyOneResult.syncState?.status, 'idle');
-    assert.equal(companyTwoResult.githubTokenConfigured, false);
-    assert.equal(resolveCount, 0);
-  } finally {
-    if (previousPaperclipHome === undefined) {
-      delete process.env.PAPERCLIP_HOME;
-    } else {
-      process.env.PAPERCLIP_HOME = previousPaperclipHome;
-    }
-
-    await rm(isolatedPaperclipHome, { recursive: true, force: true });
-  }
+  assert.equal(companyOneResult.githubTokenConfigured, true);
+  assert.equal(companyOneResult.githubTokenLogin, undefined);
+  assert.equal(companyTwoResult.githubTokenConfigured, false);
+  assert.equal(resolveCount, 0);
 });
 
-test('settings.saveRegistration persists the saved GitHub login label for later company-scoped settings reads', async () => {
+test('settings.saveRegistration persists the saved GitHub login label for later settings reads', async () => {
   const harness = createTestHarness({ manifest });
   await plugin.definition.setup(harness.ctx);
 
   const saveResult = await harness.performAction('settings.saveRegistration', {
     companyId: 'company-1',
-    githubTokenRef: 'github-secret-ref',
+    githubTokenRefs: {
+      'company-1': 'github-secret-ref'
+    },
     githubTokenLogin: 'octocat'
   }) as {
     githubTokenLogin?: string;
@@ -6546,12 +6586,18 @@ test('settings.saveRegistration persists the saved GitHub login label for later 
     scopeKind: 'instance',
     stateKey: 'paperclip-github-plugin-settings'
   }) as {
-    githubTokenLoginsByCompanyId?: Record<string, string>;
+    githubTokenRefs?: Record<string, string>;
+    githubTokenLoginByCompanyId?: Record<string, string>;
+    githubTokenLogin?: string;
   };
 
-  assert.deepEqual(savedSettings.githubTokenLoginsByCompanyId, {
+  assert.deepEqual(savedSettings.githubTokenRefs, {
+    'company-1': 'github-secret-ref'
+  });
+  assert.deepEqual(savedSettings.githubTokenLoginByCompanyId, {
     'company-1': 'octocat'
   });
+  assert.equal(savedSettings.githubTokenLogin, undefined);
 
   const registrationResult = await harness.getData<{
     githubTokenConfigured?: boolean;
@@ -6755,6 +6801,51 @@ test('worker normalizes and saves the Paperclip API base URL alongside setup', a
   };
 
   assert.equal(result.paperclipApiBaseUrl, 'http://127.0.0.1:63675');
+});
+
+test('worker scopes the saved Paperclip API base URL to the requested company', async () => {
+  const harness = createTestHarness({
+    manifest,
+    config: {
+      paperclipApiBaseUrl: 'http://127.0.0.1:63675'
+    }
+  });
+  await plugin.definition.setup(harness.ctx);
+
+  await harness.performAction('settings.saveRegistration', {
+    companyId: 'company-1',
+    paperclipApiBaseUrl: ' http://127.0.0.1:63675/api/companies/company-1/labels '
+  });
+  await harness.performAction('settings.saveRegistration', {
+    companyId: 'company-2',
+    paperclipApiBaseUrl: ' http://127.0.0.1:63675/api/companies/company-2/issues '
+  });
+
+  const companyOneResult = await harness.getData<{
+    paperclipApiBaseUrl?: string;
+  }>('settings.registration', {
+    companyId: 'company-1'
+  });
+  const companyTwoResult = await harness.getData<{
+    paperclipApiBaseUrl?: string;
+  }>('settings.registration', {
+    companyId: 'company-2'
+  });
+
+  assert.equal(companyOneResult.paperclipApiBaseUrl, 'http://127.0.0.1:63675');
+  assert.equal(companyTwoResult.paperclipApiBaseUrl, 'http://127.0.0.1:63675');
+
+  const savedSettings = harness.getState({
+    scopeKind: 'instance',
+    stateKey: 'paperclip-github-plugin-settings'
+  }) as {
+    paperclipApiBaseUrlByCompanyId?: Record<string, string>;
+  };
+
+  assert.deepEqual(savedSettings.paperclipApiBaseUrlByCompanyId, {
+    'company-1': 'http://127.0.0.1:63675',
+    'company-2': 'http://127.0.0.1:63675'
+  });
 });
 
 test('worker rejects untrusted Paperclip API origins when saving setup', async () => {
@@ -7553,141 +7644,6 @@ test('worker imports admin-authored open issues as todo when collaborator permis
 
     assert.equal(importedIssues.find((issue) => issue.title === 'Admin-authored issue')?.status, 'todo');
     assert.equal(statusTransitionComments.length, 0);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test('worker imports trusted-author-association open issues as todo when public author_association is present and collaborator permission requires auth', async () => {
-  const harness = createTestHarness({
-    manifest,
-    config: {
-      githubTokenRef: 'github-secret-ref'
-    }
-  });
-  await plugin.definition.setup(harness.ctx);
-
-  await harness.performAction('settings.saveRegistration', {
-    mappings: [
-      {
-        id: 'mapping-a',
-        repositoryUrl: 'paperclipai/example-repo',
-        paperclipProjectName: 'Engineering',
-        paperclipProjectId: 'project-1',
-        companyId: 'company-1'
-      }
-    ],
-    syncState: {
-      status: 'idle'
-    }
-  });
-
-  const originalFetch = globalThis.fetch;
-
-  globalThis.fetch = async (input, init) => {
-    const rawUrl = getRequestUrl(input);
-    const url = new URL(rawUrl);
-
-    if (url.pathname === '/repos/paperclipai/example-repo/issues' && ['all', 'open'].includes(url.searchParams.get('state') ?? '')) {
-      return jsonResponse([
-        {
-          id: 2621,
-          number: 29,
-          title: 'Member-authored issue',
-          body: 'This came from a repo member',
-          html_url: 'https://github.com/paperclipai/example-repo/issues/29',
-          user: {
-            login: 'repo-member'
-          },
-          author_association: 'MEMBER',
-          state: 'open',
-          comments: 0
-        },
-        {
-          id: 2622,
-          number: 30,
-          title: 'External issue',
-          body: 'This came from an outsider',
-          html_url: 'https://github.com/paperclipai/example-repo/issues/30',
-          user: {
-            login: 'external-reporter'
-          },
-          author_association: 'NONE',
-          state: 'open',
-          comments: 0
-        }
-      ]);
-    }
-
-    if (
-      url.pathname === '/repos/paperclipai/example-repo/collaborators/repo-member/permission'
-      || url.pathname === '/repos/paperclipai/example-repo/collaborators/external-reporter/permission'
-    ) {
-      return jsonResponse(
-        {
-          message: 'Requires authentication'
-        },
-        401
-      );
-    }
-
-    if (url.pathname === '/graphql') {
-      const { query, variables } = getGraphqlRequest(init);
-      const issueNumber = typeof variables.issueNumber === 'number' ? variables.issueNumber : undefined;
-
-      if (query.includes('query GitHubIssueParentRelationships')) {
-        return graphqlIssueParentRelationshipsResponse([
-          {
-            issueNumber: 29
-          },
-          {
-            issueNumber: 30
-          }
-        ]);
-      }
-
-      if (query.includes('query GitHubIssueStatusSnapshot') && (issueNumber === 29 || issueNumber === 30)) {
-        return graphqlResponse({
-          repository: {
-            issue: {
-              number: issueNumber,
-              state: 'OPEN',
-              stateReason: null,
-              comments: {
-                totalCount: 0
-              },
-              closedByPullRequestsReferences: {
-                pageInfo: {
-                  hasNextPage: false,
-                  endCursor: null
-                },
-                nodes: []
-              }
-            }
-          }
-        });
-      }
-    }
-
-    throw new Error(`Unexpected GitHub request: ${url.toString()}`);
-  };
-
-  try {
-    const sync = await harness.performAction('sync.runNow', {}) as {
-      syncState: { status: string; createdIssuesCount?: number; skippedIssuesCount?: number; syncedIssuesCount?: number };
-    };
-
-    assert.equal(sync.syncState.status, 'success');
-    assert.equal(sync.syncState.createdIssuesCount, 2);
-    assert.equal(sync.syncState.skippedIssuesCount, 0);
-    assert.equal(sync.syncState.syncedIssuesCount, 2);
-
-    const importedIssues = await harness.ctx.issues.list({
-      companyId: 'company-1'
-    });
-
-    assert.equal(importedIssues.find((issue) => issue.title === 'Member-authored issue')?.status, 'todo');
-    assert.equal(importedIssues.find((issue) => issue.title === 'External issue')?.status, 'backlog');
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -10167,133 +10123,6 @@ test('worker normalizes GitHub raw HTML that Paperclip issue descriptions cannot
     assert.doesNotMatch(visibleDescription, /<\/?summary\b/i);
     assert.doesNotMatch(visibleDescription, /<img\b/i);
     assert.match(description, /<!-- paperclip-github-plugin-imported-from: https:\/\/github\.com\/paperclipai\/example-repo\/issues\/10 -->/);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test('worker stores a renderable placeholder when an imported GitHub issue has no body', async () => {
-  const harness = createTestHarness({
-    manifest,
-    config: {
-      githubTokenRef: 'github-secret-ref'
-    }
-  });
-  await plugin.definition.setup(harness.ctx);
-
-  await harness.performAction('settings.saveRegistration', {
-    mappings: [
-      {
-        id: 'mapping-a',
-        repositoryUrl: 'paperclipai/example-repo',
-        paperclipProjectName: 'Engineering',
-        paperclipProjectId: 'project-1',
-        companyId: 'company-1'
-      }
-    ],
-    syncState: {
-      status: 'idle'
-    }
-  });
-
-  const originalFetch = globalThis.fetch;
-
-  globalThis.fetch = async (input, init) => {
-    const rawUrl = getRequestUrl(input);
-    const url = new URL(rawUrl);
-
-    if (url.pathname === '/repos/paperclipai/example-repo/issues' && ['all', 'open'].includes(url.searchParams.get('state') ?? '')) {
-      return jsonResponse([
-        {
-          id: 1101,
-          number: 11,
-          title: 'Missing body issue',
-          body: null,
-          html_url: 'https://github.com/paperclipai/example-repo/issues/11',
-          state: 'open',
-          comments: 0
-        }
-      ]);
-    }
-
-    if (url.pathname === '/graphql') {
-      const { query, variables } = getGraphqlRequest(init);
-      const issueNumber = typeof variables.issueNumber === 'number' ? variables.issueNumber : undefined;
-
-      if (query.includes('query GitHubRepositoryOpenIssueLinkedPullRequests')) {
-        return graphqlResponse({
-          repository: {
-            issues: {
-              pageInfo: {
-                hasNextPage: false,
-                endCursor: null
-              },
-              nodes: [
-                {
-                  number: 11,
-                  timelineItems: {
-                    nodes: []
-                  }
-                }
-              ]
-            }
-          }
-        });
-      }
-
-      if (query.includes('query GitHubIssueParentRelationships')) {
-        return graphqlIssueParentRelationshipsResponse([
-          {
-            issueNumber: 11
-          }
-        ]);
-      }
-
-      if (query.includes('query GitHubIssueStatusSnapshot') && issueNumber === 11) {
-        return graphqlResponse({
-          repository: {
-            issue: {
-              number: 11,
-              state: 'OPEN',
-              stateReason: null,
-              comments: {
-                totalCount: 0
-              },
-              closedByPullRequestsReferences: {
-                pageInfo: {
-                  hasNextPage: false,
-                  endCursor: null
-                },
-                nodes: []
-              }
-            }
-          }
-        });
-      }
-    }
-
-    throw new Error(`Unexpected GitHub request: ${url.toString()}`);
-  };
-
-  try {
-    const sync = await harness.performAction('sync.runNow', {
-      waitForCompletion: true
-    }) as {
-      syncState: { status: string };
-    };
-
-    assert.equal(sync.syncState.status, 'success');
-
-    const importedIssue = (await harness.ctx.issues.list({
-      companyId: 'company-1'
-    })).find((issue) => issue.title === 'Missing body issue');
-
-    assert.ok(importedIssue);
-
-    const description = importedIssue?.description ?? '';
-    assert.equal(stripHiddenGitHubImportMarker(description), '_No description provided on GitHub._');
-    assert.match(description, /<!-- paperclip-github-plugin-imported-from: https:\/\/github\.com\/paperclipai\/example-repo\/issues\/11 -->/);
-    assert.doesNotMatch(description, /^\s*<!--/);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -12961,223 +12790,6 @@ test('worker only resets imported issues to todo for new comments from the issue
   }
 });
 
-test('worker trusts public member author_association comments when collaborator permission requires auth', async () => {
-  const harness = createTestHarness({
-    manifest,
-    config: {
-      githubTokenRef: 'github-secret-ref'
-    }
-  });
-  await plugin.definition.setup(harness.ctx);
-
-  await harness.performAction('settings.saveRegistration', {
-    mappings: [
-      {
-        id: 'mapping-a',
-        repositoryUrl: 'paperclipai/example-repo',
-        paperclipProjectName: 'Engineering',
-        paperclipProjectId: 'project-1',
-        companyId: 'company-1'
-      }
-    ],
-    syncState: {
-      status: 'idle'
-    }
-  });
-
-  const originalUpdate = harness.ctx.issues.update;
-
-  const maintainerCommentIssue = await harness.ctx.issues.create({
-    companyId: 'company-1',
-    projectId: 'project-1',
-    title: 'Member comment can reset'
-  });
-  await originalUpdate(maintainerCommentIssue.id, { status: 'in_progress' }, 'company-1');
-
-  const outsiderCommentIssue = await harness.ctx.issues.create({
-    companyId: 'company-1',
-    projectId: 'project-1',
-    title: 'External comment cannot reset'
-  });
-  await originalUpdate(outsiderCommentIssue.id, { status: 'in_progress' }, 'company-1');
-
-  await harness.ctx.state.set(
-    {
-      scopeKind: 'instance',
-      stateKey: 'paperclip-github-plugin-import-registry'
-    },
-    [
-      {
-        mappingId: 'mapping-a',
-        githubIssueId: 4501,
-        githubIssueNumber: 45,
-        paperclipIssueId: maintainerCommentIssue.id,
-        importedAt: '2026-04-09T09:00:00.000Z',
-        lastSeenCommentCount: 1,
-        repositoryUrl: 'https://github.com/paperclipai/example-repo',
-        paperclipProjectId: 'project-1',
-        companyId: 'company-1'
-      },
-      {
-        mappingId: 'mapping-a',
-        githubIssueId: 4601,
-        githubIssueNumber: 46,
-        paperclipIssueId: outsiderCommentIssue.id,
-        importedAt: '2026-04-09T09:00:00.000Z',
-        lastSeenCommentCount: 1,
-        repositoryUrl: 'https://github.com/paperclipai/example-repo',
-        paperclipProjectId: 'project-1',
-        companyId: 'company-1'
-      }
-    ]
-  );
-
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (input, init) => {
-    const rawUrl = getRequestUrl(input);
-    const url = new URL(rawUrl);
-
-    if (url.pathname === '/repos/paperclipai/example-repo/issues' && ['all', 'open'].includes(url.searchParams.get('state') ?? '')) {
-      return jsonResponse([
-        {
-          id: 4501,
-          number: 45,
-          title: 'Member comment can reset',
-          body: null,
-          html_url: 'https://github.com/paperclipai/example-repo/issues/45',
-          user: {
-            login: 'external-reporter'
-          },
-          author_association: 'NONE',
-          state: 'open',
-          comments: 2
-        },
-        {
-          id: 4601,
-          number: 46,
-          title: 'External comment cannot reset',
-          body: null,
-          html_url: 'https://github.com/paperclipai/example-repo/issues/46',
-          user: {
-            login: 'another-reporter'
-          },
-          author_association: 'NONE',
-          state: 'open',
-          comments: 2
-        }
-      ]);
-    }
-
-    if (url.pathname === '/repos/paperclipai/example-repo/issues/45/comments') {
-      return jsonResponse([
-        {
-          id: 45011,
-          body: 'Initial issue comment',
-          user: {
-            login: 'someone-else'
-          },
-          author_association: 'NONE'
-        },
-        {
-          id: 45012,
-          body: 'Maintainer follow-up',
-          user: {
-            login: 'repo-member'
-          },
-          author_association: 'MEMBER'
-        }
-      ]);
-    }
-
-    if (url.pathname === '/repos/paperclipai/example-repo/issues/46/comments') {
-      return jsonResponse([
-        {
-          id: 46011,
-          body: 'Initial issue comment',
-          user: {
-            login: 'someone-else'
-          },
-          author_association: 'NONE'
-        },
-        {
-          id: 46012,
-          body: 'Drive-by comment',
-          user: {
-            login: 'random-driveby'
-          },
-          author_association: 'NONE'
-        }
-      ]);
-    }
-
-    if (
-      url.pathname === '/repos/paperclipai/example-repo/collaborators/repo-member/permission'
-      || url.pathname === '/repos/paperclipai/example-repo/collaborators/random-driveby/permission'
-    ) {
-      return jsonResponse(
-        {
-          message: 'Requires authentication'
-        },
-        401
-      );
-    }
-
-    if (url.pathname === '/graphql') {
-      const { query, variables } = getGraphqlRequest(init);
-      const issueNumber = typeof variables.issueNumber === 'number' ? variables.issueNumber : undefined;
-
-      if (query.includes('query GitHubIssueParentRelationships')) {
-        return graphqlIssueParentRelationshipsResponse([
-          {
-            issueNumber: 45
-          },
-          {
-            issueNumber: 46
-          }
-        ]);
-      }
-
-      if (query.includes('query GitHubIssueStatusSnapshot') && (issueNumber === 45 || issueNumber === 46)) {
-        return graphqlResponse({
-          repository: {
-            issue: {
-              number: issueNumber,
-              state: 'OPEN',
-              stateReason: null,
-              comments: {
-                totalCount: 2
-              },
-              closedByPullRequestsReferences: {
-                pageInfo: {
-                  hasNextPage: false,
-                  endCursor: null
-                },
-                nodes: []
-              }
-            }
-          }
-        });
-      }
-    }
-
-    throw new Error(`Unexpected GitHub request: ${url.toString()}`);
-  };
-
-  try {
-    const sync = await harness.performAction('sync.runNow', {
-      waitForCompletion: true
-    }) as {
-      syncState: { status: string };
-    };
-
-    assert.equal(sync.syncState.status, 'success');
-    assert.equal((await harness.ctx.issues.get(maintainerCommentIssue.id, 'company-1'))?.status, 'todo');
-    assert.equal((await harness.ctx.issues.get(outsiderCommentIssue.id, 'company-1'))?.status, 'in_progress');
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
 test('worker stores repository and issue diagnostics when a sync fails mid-run', async () => {
   const harness = createTestHarness({
     manifest,
@@ -13354,33 +12966,6 @@ test('sync.runNow falls back to the saved githubTokenRef when config has not pro
   });
 
   const result = await harness.performAction('sync.runNow', {}) as {
-    syncState: { status: string; message?: string; lastRunTrigger?: string };
-  };
-
-  assert.equal(resolvedSecretRef, 'github-secret-ref');
-  assert.equal(result.syncState.status, 'error');
-  assert.equal(result.syncState.message, 'Save at least one mapping with a created Paperclip project before running sync.');
-  assert.equal(result.syncState.lastRunTrigger, 'manual');
-});
-
-test('sync.runNow falls back to the saved company-scoped githubTokenRef when config has not propagated yet', async () => {
-  const harness = createTestHarness({ manifest });
-  await plugin.definition.setup(harness.ctx);
-
-  let resolvedSecretRef: string | null = null;
-  harness.ctx.secrets.resolve = async (secretRef) => {
-    resolvedSecretRef = secretRef;
-    return 'github-token';
-  };
-
-  await harness.performAction('settings.saveRegistration', {
-    companyId: 'company-1',
-    githubTokenRef: 'github-secret-ref'
-  });
-
-  const result = await harness.performAction('sync.runNow', {
-    companyId: 'company-1'
-  }) as {
     syncState: { status: string; message?: string; lastRunTrigger?: string };
   };
 
@@ -13685,6 +13270,79 @@ test('settings registration clears legacy setup errors once the missing token is
   assert.equal(savedState.syncState?.status, 'idle');
   assert.equal(savedState.syncState?.message, undefined);
   assert.equal(savedState.syncState?.checkedAt, undefined);
+});
+
+test('settings.registration returns the saved sync state for the requested company', async () => {
+  const harness = createTestHarness({ manifest });
+  await plugin.definition.setup(harness.ctx);
+
+  await harness.ctx.state.set(
+    {
+      scopeKind: 'instance',
+      stateKey: 'paperclip-github-plugin-settings'
+    },
+    {
+      mappings: [
+        {
+          id: 'mapping-a',
+          repositoryUrl: 'paperclipai/example-repo',
+          paperclipProjectName: 'Engineering',
+          paperclipProjectId: 'project-1',
+          companyId: 'company-1'
+        },
+        {
+          id: 'mapping-b',
+          repositoryUrl: 'paperclipai/another-repo',
+          paperclipProjectName: 'Operations',
+          paperclipProjectId: 'project-2',
+          companyId: 'company-2'
+        }
+      ],
+      syncStateByCompanyId: {
+        'company-1': {
+          status: 'running',
+          message: 'Syncing company one',
+          checkedAt: '2026-04-09T10:00:00.000Z'
+        },
+        'company-2': {
+          status: 'success',
+          message: 'Company two synced',
+          checkedAt: '2026-04-09T11:00:00.000Z'
+        }
+      },
+      scheduleFrequencyMinutesByCompanyId: {
+        'company-1': 15,
+        'company-2': 30
+      },
+      updatedAt: '2026-04-09T11:00:00.000Z'
+    }
+  );
+
+  const companyOneResult = await harness.getData<{
+    syncState: {
+      status?: string;
+      message?: string;
+      checkedAt?: string;
+    };
+  }>('settings.registration', {
+    companyId: 'company-1'
+  });
+  const companyTwoResult = await harness.getData<{
+    syncState: {
+      status?: string;
+      message?: string;
+      checkedAt?: string;
+    };
+  }>('settings.registration', {
+    companyId: 'company-2'
+  });
+
+  assert.equal(companyOneResult.syncState.status, 'running');
+  assert.equal(companyOneResult.syncState.message, 'Syncing company one');
+  assert.equal(companyOneResult.syncState.checkedAt, '2026-04-09T10:00:00.000Z');
+  assert.equal(companyTwoResult.syncState.status, 'success');
+  assert.equal(companyTwoResult.syncState.message, 'Company two synced');
+  assert.equal(companyTwoResult.syncState.checkedAt, '2026-04-09T11:00:00.000Z');
 });
 
 test('saving setup clears stale setup errors instead of resaving them from the UI payload', async () => {

@@ -12,7 +12,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 import { parseRepositoryReference, type ParsedRepositoryReference } from '../github-repo.ts';
-import { requiresPaperclipBoardAccess, shouldShowPaperclipBoardAccessSettings } from '../paperclip-health.ts';
+import { requiresPaperclipBoardAccess } from '../paperclip-health.ts';
 import { normalizeCompanyAssigneeOptionsResponse, type GitHubSyncAssigneeOption } from './assignees.ts';
 import { buildPaperclipUrl, fetchJson, fetchPaperclipHealth, resolveCliAuthPollUrl } from './http.ts';
 import { resolveInstalledGitHubSyncPluginId, resolvePluginSettingsHref } from './plugin-installation.ts';
@@ -235,8 +235,6 @@ interface GitHubSyncSettings {
   paperclipApiBaseUrl?: string;
   githubTokenConfigured?: boolean;
   githubTokenLogin?: string;
-  githubTokenNeedsConfigSync?: boolean;
-  githubTokenConfigSyncRef?: string;
   paperclipBoardAccessConfigured?: boolean;
   paperclipBoardAccessIdentity?: string;
   paperclipBoardAccessNeedsConfigSync?: boolean;
@@ -803,10 +801,8 @@ function getSyncSetupMessage(
 function usePaperclipBoardAccessRequirement(): {
   status: BoardAccessRequirementStatus;
   required: boolean;
-  visible: boolean;
 } {
   const [status, setStatus] = useState<BoardAccessRequirementStatus>('loading');
-  const [visible, setVisible] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -819,11 +815,9 @@ function usePaperclipBoardAccessRequirement(): {
 
       if (!health) {
         setStatus('unknown');
-        setVisible(false);
         return;
       }
 
-      setVisible(shouldShowPaperclipBoardAccessSettings(health));
       setStatus(requiresPaperclipBoardAccess(health) ? 'required' : 'not_required');
     })();
 
@@ -834,8 +828,7 @@ function usePaperclipBoardAccessRequirement(): {
 
   return {
     status,
-    required: status === 'required',
-    visible
+    required: status === 'required'
   };
 }
 
@@ -4341,76 +4334,20 @@ const EXTENSION_SURFACE_STYLES = `
 
   .ghsync-issue-detail {
     display: grid;
-    gap: 12px;
+    gap: 16px;
     color: var(--ghsync-text);
     font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  }
-
-  .ghsync-issue-detail__header {
-    display: flex;
-    justify-content: space-between;
-    gap: 10px;
-    align-items: flex-start;
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--ghsync-border-soft);
-  }
-
-  .ghsync-issue-detail__header-copy {
-    display: grid;
-    gap: 4px;
-    min-width: 0;
-  }
-
-  .ghsync-issue-detail__actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    justify-content: flex-end;
-    align-items: center;
-  }
-
-  .ghsync-issue-detail__action-content {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .ghsync-issue-detail__action-button {
-    text-decoration: none;
-    white-space: nowrap;
-  }
-
-  .ghsync-issue-detail__stats {
-    display: grid;
-    gap: 8px 12px;
-    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-  }
-
-  .ghsync-issue-detail__stat {
-    display: grid;
-    gap: 2px;
-    min-width: 0;
-  }
-
-  .ghsync-issue-detail__stat-label {
-    color: var(--ghsync-muted);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .ghsync-issue-detail__stat-value {
-    color: var(--ghsync-title);
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 1.35;
   }
 
   .ghsync-issue-detail__intro,
   .ghsync-issue-detail__section {
     display: grid;
-    gap: 6px;
+    gap: 8px;
+  }
+
+  .ghsync-issue-detail__intro {
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--ghsync-border-soft);
   }
 
   .ghsync-issue-detail__section-heading {
@@ -4429,16 +4366,6 @@ const EXTENSION_SURFACE_STYLES = `
 
   .ghsync-issue-detail__title h3 {
     margin: 0;
-  }
-
-  .ghsync-issue-detail .ghsync-extension-labels,
-  .ghsync-issue-detail .ghsync-extension-links {
-    gap: 6px;
-  }
-
-  .ghsync-issue-detail .ghsync-extension-pill {
-    padding: 5px 9px;
-    font-size: 11px;
   }
 
   ${SHARED_LOADING_STYLES}
@@ -10120,7 +10047,6 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
   const themeMode = useResolvedThemeMode();
   const boardAccessRequirement = usePaperclipBoardAccessRequirement();
   const armSyncCompletionToast = useSyncCompletionToast(form.syncState, toast);
-  const githubTokenConfigSyncAttemptRef = useRef<string | null>(null);
   const boardAccessConfigSyncAttemptRef = useRef<string | null>(null);
   const assigneeFallbackAttemptRef = useRef<string | null>(null);
 
@@ -10257,91 +10183,6 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
       cancelled = true;
     };
   }, [currentSettings?.availableAssignees?.length, currentSettings?.updatedAt, hostContext.companyId]);
-
-  useEffect(() => {
-    const companyId = hostContext.companyId;
-    const secretRef =
-      settings.data?.githubTokenNeedsConfigSync
-        ? settings.data.githubTokenConfigSyncRef
-        : undefined;
-
-    if (!companyId || !secretRef) {
-      return;
-    }
-
-    const attemptKey = `${companyId}:${secretRef}`;
-    if (githubTokenConfigSyncAttemptRef.current === attemptKey) {
-      return;
-    }
-    githubTokenConfigSyncAttemptRef.current = attemptKey;
-
-    let cancelled = false;
-
-    void (async () => {
-      try {
-        const pluginId = await resolveCurrentPluginId(pluginIdFromLocation);
-        if (!pluginId) {
-          throw new Error('Plugin id is required to finish syncing the GitHub token secret into plugin config.');
-        }
-
-        await patchPluginConfig(pluginId, {
-          githubTokenRefs: {
-            [companyId]: secretRef
-          }
-        });
-
-        if (cancelled) {
-          return;
-        }
-
-        const selectedAgentIds = normalizeAgentIds(settings.data?.advancedSettings?.githubTokenPropagationAgentIds);
-        if (selectedAgentIds.length > 0) {
-          try {
-            await propagateGitHubTokenToSelectedAgents({
-              selectedAgentIds,
-              previousAgentIds: selectedAgentIds,
-              githubTokenSecretRef: secretRef
-            });
-          } catch {
-            // Let the later refresh keep the saved token visible even if propagation needs manual attention.
-          }
-        }
-
-        notifyGitHubSyncSettingsChanged();
-
-        try {
-          await settings.refresh();
-        } catch {
-          return;
-        }
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-
-        toast({
-          title: 'GitHub token needs reconnection',
-          body: getActionErrorMessage(
-            error,
-            'GitHub Sync could not finish migrating the saved GitHub token secret into plugin config.'
-          ),
-          tone: 'error'
-        });
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    hostContext.companyId,
-    pluginIdFromLocation,
-    settings.data?.advancedSettings?.githubTokenPropagationAgentIds,
-    settings.data?.githubTokenConfigSyncRef,
-    settings.data?.githubTokenNeedsConfigSync,
-    settings.refresh,
-    toast
-  ]);
 
   useEffect(() => {
     const companyId = hostContext.companyId;
@@ -10496,7 +10337,6 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
   const hasSavedToken = Boolean(form.githubTokenConfigured || showSavedTokenHint);
   const boardAccessConfigured = Boolean(form.paperclipBoardAccessConfigured);
   const boardAccessRequired = boardAccessRequirement.required;
-  const boardAccessVisible = boardAccessRequirement.visible;
   const boardAccessReady = !boardAccessRequired || (hasCompanyContext && boardAccessConfigured);
   const tokenStatus = tokenStatusOverride ?? (hasSavedToken ? 'valid' : 'required');
   const tokenTone: Tone = tokenStatus === 'valid' ? 'success' : tokenStatus === 'invalid' ? 'danger' : 'warning';
@@ -10506,8 +10346,12 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
     tokenStatus === 'invalid'
         ? 'GitHub rejected the last token.'
         : tokenStatus === 'required'
-          ? 'Add a token.'
-          : 'Shared token.';
+          ? hasCompanyContext
+            ? 'Add a token for this company.'
+            : 'Select a company.'
+          : hasCompanyContext
+            ? 'Token configured for the selected company context.'
+            : 'Saved in one or more companies.';
   const tokenDescription = tokenStatusDescription;
   const tokenPermissionAuditData = tokenPermissionAudit.data;
   const tokenPermissionAuditMeta = getGitHubTokenPermissionAuditMeta(tokenPermissionAuditData);
@@ -10685,7 +10529,7 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
   const manualSyncScopePillLabel = hasCompanyContext ? 'This company' : 'All companies';
   const manualSyncButtonLabel = hasCompanyContext ? 'Run sync for this company' : 'Run sync across all companies';
   const advancedSettingsSummary = formatAdvancedSettingsSummary(form.advancedSettings, availableAssignees, {
-    includePropagation: boardAccessVisible
+    includePropagation: boardAccessRequired
   });
   const assigneeSelectOptions: SettingsSelectOption[] = [
     { value: '', label: 'Unassigned' },
@@ -10725,7 +10569,9 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
             <span className={`ghsync__scope-pill ${hasCompanyContext ? 'ghsync__scope-pill--company' : 'ghsync__scope-pill--mixed'}`}>
               {hasCompanyContext ? currentCompanyName : 'No company'}
             </span>
-            <span className="ghsync__scope-pill ghsync__scope-pill--global">Shared</span>
+            {hasCompanyContext ? (
+              <span className="ghsync__scope-pill ghsync__scope-pill--company">Company</span>
+            ) : null}
             <span className="ghsync__badge ghsync__badge--neutral">
               <LoadingSpinner size="sm" label="Loading settings" />
               Loading
@@ -10870,7 +10716,7 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
     previousAgentIds?: string[];
     githubTokenSecretRef?: string;
   }): Promise<void> {
-    if (!boardAccessVisible) {
+    if (!boardAccessRequired) {
       return;
     }
 
@@ -10884,11 +10730,11 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
       typeof options.githubTokenSecretRef === 'string' && options.githubTokenSecretRef.trim()
         ? options.githubTokenSecretRef.trim()
         : undefined;
+    const companyId = hostContext.companyId;
 
     if (!githubTokenSecretRef) {
-      const companyId = hostContext.companyId;
       if (!companyId) {
-        throw new Error('Company context is required to propagate the GitHub token to selected agents.');
+        throw new Error('Company context is required to propagate the GitHub token.');
       }
 
       const pluginId = await resolveCurrentPluginId(pluginIdFromLocation);
@@ -10897,7 +10743,8 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
       }
 
       const currentConfigResponse = await fetchJson<PluginConfigResponse | null>(`/api/plugins/${pluginId}/config`);
-      githubTokenSecretRef = normalizePluginConfig(currentConfigResponse?.configJson).githubTokenRefs?.[companyId];
+      const normalizedConfig = normalizePluginConfig(currentConfigResponse?.configJson);
+      githubTokenSecretRef = normalizedConfig.githubTokenRefs?.[companyId];
     }
 
     if (!githubTokenSecretRef) {
@@ -10965,7 +10812,9 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
       });
       await saveRegistration({
         companyId,
-        githubTokenRef: secret.id,
+        githubTokenRefs: {
+          [companyId]: secret.id
+        },
         githubTokenLogin: validation.login
       });
 
@@ -11337,7 +11186,7 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
           <span className={`ghsync__scope-pill ${hasCompanyContext ? 'ghsync__scope-pill--company' : 'ghsync__scope-pill--mixed'}`}>
             {hasCompanyContext ? currentCompanyName : 'No company'}
           </span>
-          <span className="ghsync__scope-pill ghsync__scope-pill--global">Shared</span>
+          <span className="ghsync__scope-pill ghsync__scope-pill--company">Company</span>
           <span className={`ghsync__badge ${getToneClass(tokenTone)}`}>
             <span className="ghsync__badge-dot" aria-hidden="true" />
             {tokenBannerLabel}
@@ -11365,7 +11214,7 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
                 <div className="ghsync__section-title-row">
                   <h4>GitHub access</h4>
                   <div className="ghsync__section-tags">
-                    <span className="ghsync__scope-pill ghsync__scope-pill--global">Shared</span>
+                    <span className="ghsync__scope-pill ghsync__scope-pill--company">Company</span>
                   </div>
                 </div>
                 <p>{tokenDescription}</p>
@@ -11378,11 +11227,9 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
             {!hasCompanyContext ? (
               <div className="ghsync__locked">
                 <div>
-                  <strong>{hasSavedToken ? 'Shared token ready' : 'Company required'}</strong>
+                  <strong>Company required</strong>
                   <span>
-                    {hasSavedToken
-                      ? 'Open a company to replace it.'
-                      : 'Open a company to save it.'}
+                    Open a company to view or save its token.
                   </span>
                 </div>
                 <span className="ghsync__badge ghsync__badge--neutral">Read only</span>
@@ -11439,8 +11286,8 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
             ) : (
               <div className="ghsync__connected">
                 <div>
-                  <strong>{validatedLogin ? `Authenticated as ${validatedLogin}` : 'Shared token ready'}</strong>
-                  <span>Shared across all companies.</span>
+                  <strong>{validatedLogin ? `Authenticated as ${validatedLogin}` : 'Company token ready'}</strong>
+                  <span>{`Used for sync in ${currentCompanyName}.`}</span>
                 </div>
                 <button
                   type="button"
@@ -11516,7 +11363,7 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
             ) : null}
           </section>
 
-          {boardAccessVisible ? (
+          {boardAccessRequired ? (
             <section className="ghsync__section">
               <div className="ghsync__section-head">
                 <div className="ghsync__section-copy">
@@ -11554,7 +11401,7 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
                           ? 'Required in authenticated deployments.'
                           : boardAccessRequirement.status === 'loading'
                             ? 'Checking whether it is required.'
-                            : 'Available here for local testing and only required when Paperclip API calls need sign-in.'}
+                            : 'Only needed when Paperclip API calls require sign-in.'}
                     </span>
                   </div>
                   <button
@@ -11838,7 +11685,7 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
                   <p className="ghsync__hint">Comma or newline separated.</p>
                 </div>
 
-                {boardAccessVisible ? (
+                {boardAccessRequired ? (
                   <div className="ghsync__field">
                     <label htmlFor="advanced-token-propagation">Propagate GitHub token to agents</label>
                     <SettingsAgentMultiPicker
@@ -11876,7 +11723,7 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
                   <h4>Sync</h4>
                   <div className="ghsync__section-tags">
                     <span className={manualSyncScopePillClass}>{manualSyncScopePillLabel}</span>
-                    <span className="ghsync__scope-pill ghsync__scope-pill--global">Shared cadence</span>
+                    <span className="ghsync__scope-pill ghsync__scope-pill--global">Company cadence</span>
                   </div>
                 </div>
                 {syncSectionDescription ? <p>{syncSectionDescription}</p> : null}
@@ -11917,9 +11764,9 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
                   </div>
 
                   <div className="ghsync__schedule-meta">
-                    <span className="ghsync__scope-pill ghsync__scope-pill--global">Shared</span>
+                    <span className="ghsync__scope-pill ghsync__scope-pill--global">Company</span>
                     <strong>Auto-sync {scheduleDescription}</strong>
-                    <span>All companies.</span>
+                    <span>Used for sync in {currentCompanyName}.</span>
                   </div>
                 </div>
 
@@ -12070,7 +11917,7 @@ export function GitHubSyncSettingsPage(): React.JSX.Element {
               </span>
             </div>
 
-            {boardAccessVisible ? (
+            {boardAccessRequired ? (
               <div className="ghsync__check">
                 <div className="ghsync__check-top">
                   <strong>Paperclip board access</strong>
@@ -12764,9 +12611,6 @@ function GitHubSyncToolbarButtonSurface(props: {
   entityId?: string | null;
   companyId?: string | null;
   projectId?: string | null;
-  embedded?: boolean;
-  ignoreVisibility?: boolean;
-  buttonClassName?: string;
 }): React.JSX.Element | null {
   const toast = usePluginToast();
   const runSyncNow = usePluginAction('sync.runNow');
@@ -12938,7 +12782,7 @@ function GitHubSyncToolbarButtonSurface(props: {
   }, [toolbarState.refresh, settingsRegistration.refresh, props.companyId, effectiveEntityId, props.entityType]);
 
   useEffect(() => {
-    if (!props.entityType || props.embedded) {
+    if (!props.entityType) {
       return;
     }
 
@@ -12958,15 +12802,9 @@ function GitHubSyncToolbarButtonSurface(props: {
     };
   });
 
-  if (!state.visible && !props.ignoreVisibility) {
+  if (!state.visible) {
     return null;
   }
-
-  const resolvedButtonClassName =
-    props.buttonClassName
-    ?? (props.entityType
-      ? HOST_ENTITY_BUTTON_CLASSNAME
-      : HOST_GLOBAL_BUTTON_CLASSNAME);
 
   async function handleRunSync(): Promise<void> {
     try {
@@ -13062,11 +12900,7 @@ function GitHubSyncToolbarButtonSurface(props: {
   return (
     <div
       ref={surfaceRef}
-      className={[
-        'ghsync-toolbar-button',
-        props.entityType && !props.embedded ? 'ghsync-toolbar-button--entity' : '',
-        props.embedded ? 'ghsync-toolbar-button--embedded' : ''
-      ].filter(Boolean).join(' ')}
+      className={`ghsync-toolbar-button${props.entityType ? ' ghsync-toolbar-button--entity' : ''}`}
       style={themeVars}
       title={toolbarState.error?.message ?? effectiveMessage}
     >
@@ -13076,7 +12910,7 @@ function GitHubSyncToolbarButtonSurface(props: {
         data-slot="button"
         data-variant="outline"
         data-size="sm"
-        className={resolvedButtonClassName}
+        className={props.entityType ? HOST_ENTITY_BUTTON_CLASSNAME : HOST_GLOBAL_BUTTON_CLASSNAME}
         disabled={
           toolbarState.loading
           || syncStartPending
@@ -13103,7 +12937,7 @@ export function GitHubSyncGlobalToolbarButton(): React.JSX.Element | null {
 export function GitHubSyncEntityToolbarButton(): React.JSX.Element | null {
   const context = useHostContext();
 
-  if (context.entityType !== 'project' || !context.entityId) {
+  if ((context.entityType !== 'issue' && context.entityType !== 'project') || !context.entityId) {
     return null;
   }
 
@@ -13117,30 +12951,7 @@ export function GitHubSyncEntityToolbarButton(): React.JSX.Element | null {
   );
 }
 
-function GitHubIssueDetailLinkButton(props: {
-  href: string;
-  label: string;
-}): React.JSX.Element {
-  return (
-    <a
-      href={props.href}
-      target="_blank"
-      rel="noreferrer"
-      className={getPluginActionClassName({
-        variant: 'secondary',
-        size: 'sm',
-        extraClassName: 'ghsync-issue-detail__action-button'
-      })}
-    >
-      <span className="ghsync-issue-detail__action-content">
-        <GitHubMarkIcon className="h-3.5 w-3.5" />
-        <span>{props.label}</span>
-      </span>
-    </a>
-  );
-}
-
-function GitHubSyncIssueTaskDetailViewContent(props: {
+function GitHubSyncIssueDetailTabContent(props: {
   companyId?: string | null;
   issueId?: string | null;
   loadingIssueId?: boolean;
@@ -13176,47 +12987,41 @@ function GitHubSyncIssueTaskDetailViewContent(props: {
 
       {issueDetails ? (
         <>
-          <div className="ghsync-issue-detail__header">
-            <div className="ghsync-issue-detail__header-copy">
+          <div className="ghsync-extension-heading">
+            <div>
               <h4>Issue #{issueDetails.githubIssueNumber}</h4>
               <p>{formatGitHubRepositoryLabel(issueDetails.repositoryUrl)}</p>
             </div>
-            <div className="ghsync-issue-detail__actions">
-              <GitHubIssueDetailLinkButton
-                href={issueDetails.githubIssueUrl}
-                label="Open on GitHub"
-              />
-              <GitHubSyncToolbarButtonSurface
-                companyId={props.companyId}
-                entityId={props.issueId}
-                entityType="issue"
-                embedded
-                ignoreVisibility
-                buttonClassName={getPluginActionClassName({
-                  variant: 'secondary',
-                  size: 'sm',
-                  extraClassName: 'ghsync-issue-detail__action-button'
-                })}
-              />
-            </div>
+            <a
+              href={issueDetails.githubIssueUrl}
+              target="_blank"
+              rel="noreferrer"
+              className={getPluginActionClassName({
+                variant: 'secondary',
+                size: 'sm',
+                extraClassName: 'ghsync-extension-link'
+              })}
+            >
+              Open on GitHub
+            </a>
           </div>
 
-          <div className="ghsync-issue-detail__stats">
-            <div className="ghsync-issue-detail__stat">
-              <span className="ghsync-issue-detail__stat-label">State</span>
-              <strong className="ghsync-issue-detail__stat-value">{formatGitHubIssueState(issueDetails.githubIssueState, issueDetails.githubIssueStateReason)}</strong>
+          <div className="ghsync-extension-grid">
+            <div className="ghsync-extension-metric">
+              <span>State</span>
+              <strong>{formatGitHubIssueState(issueDetails.githubIssueState, issueDetails.githubIssueStateReason)}</strong>
             </div>
-            <div className="ghsync-issue-detail__stat">
-              <span className="ghsync-issue-detail__stat-label">Comments</span>
-              <strong className="ghsync-issue-detail__stat-value">{issueDetails.commentsCount ?? 'Unknown'}</strong>
+            <div className="ghsync-extension-metric">
+              <span>Comments</span>
+              <strong>{issueDetails.commentsCount ?? 'Unknown'}</strong>
             </div>
-            <div className="ghsync-issue-detail__stat">
-              <span className="ghsync-issue-detail__stat-label">Linked PRs</span>
-              <strong className="ghsync-issue-detail__stat-value">{issueDetails.linkedPullRequestNumbers.length}</strong>
+            <div className="ghsync-extension-metric">
+              <span>Linked PRs</span>
+              <strong>{issueDetails.linkedPullRequestNumbers.length}</strong>
             </div>
-            <div className="ghsync-issue-detail__stat">
-              <span className="ghsync-issue-detail__stat-label">Last synced</span>
-              <strong className="ghsync-issue-detail__stat-value">{issueDetails.syncedAt ? formatDate(issueDetails.syncedAt, 'Unknown') : 'Pending refresh'}</strong>
+            <div className="ghsync-extension-metric">
+              <span>Last synced</span>
+              <strong>{issueDetails.syncedAt ? formatDate(issueDetails.syncedAt, 'Unknown') : 'Pending refresh'}</strong>
             </div>
           </div>
 
@@ -13225,11 +13030,19 @@ function GitHubSyncIssueTaskDetailViewContent(props: {
               <div className="ghsync-issue-detail__section-heading">Linked pull requests</div>
               <div className="ghsync-extension-links">
                 {issueDetails.linkedPullRequestNumbers.map((pullRequestNumber: number) => (
-                  <GitHubIssueDetailLinkButton
+                  <a
                     key={pullRequestNumber}
                     href={`${issueDetails.repositoryUrl}/pull/${pullRequestNumber}`}
-                    label={`PR #${pullRequestNumber}`}
-                  />
+                    target="_blank"
+                    rel="noreferrer"
+                    className={getPluginActionClassName({
+                      variant: 'secondary',
+                      size: 'sm',
+                      extraClassName: 'ghsync-extension-link'
+                    })}
+                  >
+                    PR #{pullRequestNumber}
+                  </a>
                 ))}
               </div>
             </div>
@@ -13277,7 +13090,7 @@ export function GitHubSyncIssueTaskDetailView(): React.JSX.Element {
   const detailKey = `${context.companyId ?? 'company-none'}:${resolvedIssue.issueIdentifier ?? context.entityId ?? 'issue-none'}`;
 
   return (
-    <GitHubSyncIssueTaskDetailViewContent
+    <GitHubSyncIssueDetailTabContent
       key={detailKey}
       companyId={context.companyId}
       issueId={resolvedIssue.issueId}
@@ -13286,6 +13099,8 @@ export function GitHubSyncIssueTaskDetailView(): React.JSX.Element {
     />
   );
 }
+
+export const GitHubSyncIssueDetailTab = GitHubSyncIssueTaskDetailView;
 
 export function GitHubSyncCommentAnnotation(): React.JSX.Element | null {
   const context = useHostContext();
