@@ -103,10 +103,10 @@ export const manifest: PaperclipPluginManifestV1 = {
         exportName: 'GitHubSyncDashboardWidget'
       },
       {
-        type: 'detailTab',
+        type: 'taskDetailView',
         id: 'paperclip-github-plugin-issue-detail-tab',
         displayName: 'GitHub',
-        exportName: 'GitHubSyncIssueDetailTab',
+        exportName: 'GitHubSyncIssueTaskDetailView',
         entityTypes: ['issue']
       },
       {
@@ -127,7 +127,7 @@ export const manifest: PaperclipPluginManifestV1 = {
         id: 'paperclip-github-plugin-toolbar-button',
         displayName: 'GitHub Sync',
         exportName: 'GitHubSyncEntityToolbarButton',
-        entityTypes: ['project', 'issue']
+        entityTypes: ['project']
       },
       {
         type: 'settingsPage',

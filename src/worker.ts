@@ -3497,7 +3497,7 @@ async function buildToolbarSyncState(
 
     return {
       kind: 'issue',
-      visible: Boolean(link),
+      visible: false,
       canRun: githubTokenConfigured && mappings.length > 0,
       label: link?.githubIssueNumber ? `Sync #${link.githubIssueNumber}` : 'Sync issue',
       message: link
@@ -9013,11 +9013,11 @@ function getConfiguredGithubTokenSource(
 ): ResolvedGitHubTokenSource {
   const normalizedCompanyId = normalizeCompanyId(companyId);
   const secretRef =
-    (normalizedCompanyId
-      ? normalizeSecretRef(config.githubTokenRefs?.[normalizedCompanyId]) ?? getSavedGitHubTokenRef(settings, normalizedCompanyId)
-      : undefined)
-    ?? normalizeGitHubTokenRef(config.githubTokenRef)
-    ?? getSavedGitHubTokenRef(settings);
+    normalizedCompanyId
+      ? normalizeSecretRef(config.githubTokenRefs?.[normalizedCompanyId])
+        ?? normalizeGitHubTokenRef(config.githubTokenRef)
+        ?? getSavedGitHubTokenRef(settings, normalizedCompanyId)
+      : normalizeGitHubTokenRef(config.githubTokenRef) ?? getSavedGitHubTokenRef(settings);
   if (secretRef) {
     return { secretRef };
   }
