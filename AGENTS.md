@@ -103,3 +103,8 @@ Update the matching global skills when any of these change:
 - reusable Paperclip plugin UI patterns or helper components
 - reusable Paperclip plugin worker/backend patterns or helper functions
 - recommended verification or testing patterns for plugins in this repo
+
+<!-- SPECKIT START -->
+For additional context about technologies to be used, project structure,
+shell commands, and other important information, read the current plan
+<!-- SPECKIT END -->
