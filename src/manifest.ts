@@ -1,8 +1,6 @@
 import { createRequire } from 'node:module';
 import type { PaperclipPluginManifestV1 } from '@paperclipai/plugin-sdk';
 
-import { GITHUB_AGENT_TOOLS } from './github-agent-tools.ts';
-
 const require = createRequire(import.meta.url);
 const packageJson = require('../package.json') as { version?: unknown };
 const DASHBOARD_WIDGET_CAPABILITY = 'ui.dashboardWidget.register' as unknown as PaperclipPluginManifestV1['capabilities'][number];
@@ -14,16 +12,14 @@ const MANIFEST_VERSION =
   || '0.0.0-dev';
 
 export const manifest: PaperclipPluginManifestV1 = {
-  id: 'paperclip-github-plugin',
+  id: 'paperclip-jira-plugin',
   apiVersion: 1,
   version: MANIFEST_VERSION,
-  displayName: 'GitHub Sync',
-  description: 'Synchronize GitHub issues into Paperclip projects.',
+  displayName: 'Jira Sync',
+  description: 'Synchronize Jira issues into Paperclip projects and sync issue/comment changes both ways.',
   author: 'Álvaro Sánchez-Mariscal',
   categories: ['connector', 'ui'],
   capabilities: [
-    'ui.sidebar.register',
-    'ui.page.register',
     DASHBOARD_WIDGET_CAPABILITY,
     'ui.detailTab.register',
     'ui.commentAnnotation.register',
@@ -37,44 +33,39 @@ export const manifest: PaperclipPluginManifestV1 = {
     'issues.update',
     'issue.comments.read',
     'issue.comments.create',
-    'agents.read',
     'jobs.schedule',
     'http.outbound',
-    'secrets.read-ref',
-    'agent.tools.register'
+    'secrets.read-ref'
   ],
   instanceConfigSchema: {
     type: 'object',
     properties: {
-      githubTokenRefs: {
-        type: 'object',
-        title: 'GitHub Token Secrets',
-        additionalProperties: {
-          type: 'string'
-        }
-      },
-      paperclipBoardApiTokenRefs: {
-        type: 'object',
-        title: 'Paperclip Board Token Secrets',
-        additionalProperties: {
-          type: 'string'
-        }
-      },
-      paperclipApiBaseUrl: {
+      jiraBaseUrl: {
         type: 'string',
-        title: 'Trusted Paperclip API Origin'
+        title: 'Jira Base URL'
+      },
+      jiraUserEmail: {
+        type: 'string',
+        title: 'Jira User Email'
+      },
+      jiraTokenRef: {
+        type: 'string',
+        title: 'Jira API Token Secret Ref'
+      },
+      defaultIssueType: {
+        type: 'string',
+        title: 'Default Jira Issue Type'
       }
     }
   },
   jobs: [
     {
-      jobKey: 'sync.github-issues',
-      displayName: 'Sync GitHub issues',
-      description: 'Checks for GitHub issue updates and syncs them on the configured cadence.',
+      jobKey: 'sync.jira-issues',
+      displayName: 'Sync Jira issues',
+      description: 'Checks for Jira updates and imports/syncs issues on the configured cadence.',
       schedule: SCHEDULE_TICK_CRON
     }
   ],
-  tools: GITHUB_AGENT_TOOLS,
   entrypoints: {
     worker: './dist/worker.js',
     ui: './dist/ui/'
@@ -82,58 +73,43 @@ export const manifest: PaperclipPluginManifestV1 = {
   ui: {
     slots: [
       {
-        type: 'page',
-        id: 'paperclip-github-plugin-project-pull-requests-page',
-        displayName: 'Pull Requests',
-        exportName: 'GitHubSyncProjectPullRequestsPage',
-        routePath: 'github-pull-requests'
-      },
-      {
-        type: 'projectSidebarItem',
-        id: 'paperclip-github-plugin-project-pull-requests-sidebar-item',
-        displayName: 'Pull Requests',
-        exportName: 'GitHubSyncProjectPullRequestsSidebarItem',
-        entityTypes: ['project'],
-        order: 40
-      },
-      {
         type: 'dashboardWidget',
-        id: 'paperclip-github-plugin-dashboard-widget',
-        displayName: 'GitHub Sync',
-        exportName: 'GitHubSyncDashboardWidget'
+        id: 'paperclip-jira-plugin-dashboard-widget',
+        displayName: 'Jira Sync',
+        exportName: 'JiraSyncDashboardWidget'
       },
       {
         type: 'taskDetailView',
-        id: 'paperclip-github-plugin-issue-detail-tab',
-        displayName: 'GitHub',
-        exportName: 'GitHubSyncIssueTaskDetailView',
+        id: 'paperclip-jira-plugin-task-detail-view',
+        displayName: 'Jira Sync',
+        exportName: 'JiraSyncIssueTaskDetailView',
         entityTypes: ['issue']
       },
       {
         type: 'commentAnnotation',
-        id: 'paperclip-github-plugin-comment-annotation',
-        displayName: 'GitHub Sync Links',
-        exportName: 'GitHubSyncCommentAnnotation',
+        id: 'paperclip-jira-plugin-comment-annotation',
+        displayName: 'Jira Comment Sync',
+        exportName: 'JiraSyncCommentAnnotation',
         entityTypes: ['comment']
       },
       {
         type: 'globalToolbarButton',
-        id: 'paperclip-github-plugin-global-toolbar-button',
-        displayName: 'GitHub Sync',
-        exportName: 'GitHubSyncGlobalToolbarButton'
+        id: 'paperclip-jira-plugin-global-toolbar-button',
+        displayName: 'Jira Sync',
+        exportName: 'JiraSyncGlobalToolbarButton'
       },
       {
         type: 'toolbarButton',
-        id: 'paperclip-github-plugin-toolbar-button',
-        displayName: 'GitHub Sync',
-        exportName: 'GitHubSyncEntityToolbarButton',
-        entityTypes: ['project']
+        id: 'paperclip-jira-plugin-toolbar-button',
+        displayName: 'Jira Sync',
+        exportName: 'JiraSyncEntityToolbarButton',
+        entityTypes: ['project', 'issue']
       },
       {
         type: 'settingsPage',
-        id: 'paperclip-github-plugin-settings-page',
-        displayName: 'GitHub Sync',
-        exportName: 'GitHubSyncSettingsPage'
+        id: 'paperclip-jira-plugin-settings-page',
+        displayName: 'Jira Sync',
+        exportName: 'JiraSyncSettingsPage'
       }
     ]
   }

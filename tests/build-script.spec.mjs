@@ -9,12 +9,12 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 
 test('build script reports missing local dependencies clearly when node_modules is absent', async () => {
-  const tempDir = await mkdtemp(join(tmpdir(), 'paperclip-github-plugin-build-no-deps-'));
+  const tempDir = await mkdtemp(join(tmpdir(), 'paperclip-jira-plugin-build-no-deps-'));
 
   try {
     await cp(new URL('../scripts', import.meta.url), join(tempDir, 'scripts'), { recursive: true });
     await writeFile(join(tempDir, 'package.json'), JSON.stringify({
-      name: 'paperclip-github-plugin-test-fixture',
+      name: 'paperclip-jira-plugin-test-fixture',
       version: '0.0.0-test',
       type: 'module'
     }, null, 2));
