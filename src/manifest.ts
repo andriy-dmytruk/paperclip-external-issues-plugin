@@ -15,7 +15,7 @@ export const manifest: PaperclipPluginManifestV1 = {
   id: 'paperclip-jira-plugin',
   apiVersion: 1,
   version: MANIFEST_VERSION,
-  displayName: 'Jira Sync',
+  displayName: 'Issue Sync',
   description: 'Synchronize Jira issues into Paperclip projects and sync issue/comment changes both ways.',
   author: 'Álvaro Sánchez-Mariscal',
   categories: ['connector', 'ui'],
@@ -40,6 +40,23 @@ export const manifest: PaperclipPluginManifestV1 = {
   instanceConfigSchema: {
     type: 'object',
     properties: {
+      providers: {
+        type: 'array',
+        title: 'Saved issue providers',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            type: { type: 'string', enum: ['jira'] },
+            name: { type: 'string' },
+            jiraBaseUrl: { type: 'string' },
+            jiraUserEmail: { type: 'string' },
+            jiraToken: { type: 'string' },
+            jiraTokenRef: { type: 'string' },
+            defaultIssueType: { type: 'string' }
+          }
+        }
+      },
       jiraBaseUrl: {
         type: 'string',
         title: 'Jira Base URL'
@@ -47,6 +64,11 @@ export const manifest: PaperclipPluginManifestV1 = {
       jiraUserEmail: {
         type: 'string',
         title: 'Jira User Email'
+      },
+      jiraToken: {
+        type: 'string',
+        title: 'Jira API Token',
+        description: 'Optional inline Jira API token for local provider configuration.'
       },
       jiraTokenRef: {
         type: 'string',
@@ -75,13 +97,13 @@ export const manifest: PaperclipPluginManifestV1 = {
       {
         type: 'dashboardWidget',
         id: 'paperclip-jira-plugin-dashboard-widget',
-        displayName: 'Jira Sync',
+        displayName: 'Issue Sync',
         exportName: 'JiraSyncDashboardWidget'
       },
       {
         type: 'taskDetailView',
         id: 'paperclip-jira-plugin-task-detail-view',
-        displayName: 'Jira Sync',
+        displayName: 'Issue Sync',
         exportName: 'JiraSyncIssueTaskDetailView',
         entityTypes: ['issue']
       },
@@ -93,23 +115,39 @@ export const manifest: PaperclipPluginManifestV1 = {
         entityTypes: ['comment']
       },
       {
-        type: 'globalToolbarButton',
-        id: 'paperclip-jira-plugin-global-toolbar-button',
-        displayName: 'Jira Sync',
-        exportName: 'JiraSyncGlobalToolbarButton'
-      },
-      {
-        type: 'toolbarButton',
-        id: 'paperclip-jira-plugin-toolbar-button',
-        displayName: 'Jira Sync',
-        exportName: 'JiraSyncEntityToolbarButton',
-        entityTypes: ['project', 'issue']
-      },
-      {
         type: 'settingsPage',
         id: 'paperclip-jira-plugin-settings-page',
-        displayName: 'Jira Sync',
+        displayName: 'Issue Sync',
         exportName: 'JiraSyncSettingsPage'
+      }
+    ],
+    launchers: [
+      {
+        id: 'paperclip-jira-plugin-global-launcher',
+        displayName: 'Sync Issues',
+        placementZone: 'globalToolbarButton',
+        action: {
+          type: 'openModal',
+          target: 'JiraSyncLauncherModal'
+        },
+        render: {
+          environment: 'hostOverlay',
+          bounds: 'wide'
+        }
+      },
+      {
+        id: 'paperclip-jira-plugin-entity-launcher',
+        displayName: 'Sync Issues',
+        placementZone: 'toolbarButton',
+        entityTypes: ['project', 'issue'],
+        action: {
+          type: 'openModal',
+          target: 'JiraSyncLauncherModal'
+        },
+        render: {
+          environment: 'hostOverlay',
+          bounds: 'wide'
+        }
       }
     ]
   }

@@ -5,8 +5,29 @@ import { createTestHarness } from '@paperclipai/plugin-sdk/testing';
 
 import manifest from '../src/manifest.ts';
 import plugin from '../src/worker.ts';
+import { buildCommentOriginLabel, buildSyncProgressLabel } from '../src/ui/index.tsx';
 
 type MockFetchHandler = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+type TaskFilters = {
+  onlyActive?: boolean;
+  author?: string;
+  assignee?: string;
+  issueNumberGreaterThan?: number;
+  issueNumberLessThan?: number;
+};
+type CommentSyncPresentation = {
+  visible: boolean;
+  linked: boolean;
+  origin: 'paperclip' | 'provider_pull' | 'provider_push';
+  providerKey?: string;
+  jiraIssueKey?: string;
+  jiraUrl?: string;
+  upstreamCommentId?: string | null;
+  isEditable?: boolean;
+  uploadAvailable?: boolean;
+  lastSyncedAt?: string | null;
+  syncMessage?: string;
+};
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -105,8 +126,9 @@ function makeIssue(overrides: Record<string, unknown> = {}) {
 
 test('manifest exposes the Jira Sync identity and settings page', async () => {
   assert.equal(manifest.id, 'paperclip-jira-plugin');
-  assert.equal(manifest.displayName, 'Jira Sync');
+  assert.equal(manifest.displayName, 'Issue Sync');
   assert.ok(manifest.ui?.slots?.some((slot) => slot.type === 'settingsPage'));
+  assert.ok((manifest.instanceConfigSchema as any)?.properties?.jiraToken);
 });
 
 test('settings save keeps mappings scoped per company', async () => {
@@ -149,6 +171,173 @@ test('settings save keeps mappings scoped per company', async () => {
   assert.equal(registration.mappings[0]?.jiraProjectKey, 'GRB');
   assert.equal(registration.mappings[0]?.paperclipProjectId, 'project-1');
   assert.equal(registration.scheduleFrequencyMinutes, 30);
+});
+
+test('settings registration exposes provider-aware popup data and per-mapping filters', async () => {
+  const harness = createTestHarness({
+    manifest,
+    config: {
+      jiraBaseUrl: 'https://jira.example.com',
+      jiraToken: 'jira-token'
+    } as any
+  });
+  await plugin.definition.setup(harness.ctx);
+
+  harness.seed({
+    projects: [
+      makeProject()
+    ]
+  });
+
+  await harness.performAction('settings.saveRegistration', {
+    companyId: 'company-1',
+    scheduleFrequencyMinutes: 45,
+    mappings: [
+      {
+        providerId: 'provider-default-jira',
+        jiraProjectKey: 'GRB',
+        paperclipProjectId: 'project-1',
+        paperclipProjectName: 'Alpha',
+        filters: {
+          onlyActive: true,
+          author: 'alice',
+          assignee: 'bob',
+          issueNumberGreaterThan: 10,
+          issueNumberLessThan: 20
+        }
+      }
+    ]
+  });
+
+  const popupState = await harness.getData<{
+    selectedProviderId?: string | null;
+    selectedProviderKey: string;
+    mappings: Array<{ providerId?: string; filters?: TaskFilters }>;
+    providerConfig?: { tokenSaved?: boolean; providerName?: string };
+    syncProgress?: { status: string };
+    availableProjects: Array<{ id: string }>;
+    providers: Array<{ providerId: string; displayName: string }>;
+  }>('sync.popupState', {
+    companyId: 'company-1'
+  });
+
+  const providers = await harness.getData<{
+    providers: Array<{ providerId: string; providerKey: string; displayName: string; status: string }>;
+  }>('sync.providers', {
+    companyId: 'company-1'
+  });
+
+  assert.equal(popupState.selectedProviderKey, 'jira');
+  assert.equal(popupState.selectedProviderId, 'provider-default-jira');
+  assert.equal(popupState.mappings[0]?.providerId, 'provider-default-jira');
+  assert.equal(popupState.mappings[0]?.filters?.onlyActive, true);
+  assert.equal(popupState.mappings[0]?.filters?.author, 'alice');
+  assert.equal(popupState.mappings[0]?.filters?.assignee, 'bob');
+  assert.equal(popupState.mappings[0]?.filters?.issueNumberGreaterThan, 10);
+  assert.equal(popupState.mappings[0]?.filters?.issueNumberLessThan, 20);
+  assert.equal(popupState.providerConfig?.tokenSaved, true);
+  assert.equal(popupState.providerConfig?.providerName, 'Default Jira');
+  assert.equal(popupState.syncProgress?.status, 'idle');
+  assert.equal(popupState.availableProjects[0]?.id, 'project-1');
+  assert.equal(popupState.providers[0]?.providerId, 'provider-default-jira');
+  assert.equal(providers.providers[0]?.providerKey, 'jira');
+  assert.equal(providers.providers[0]?.displayName, 'Default Jira');
+});
+
+test('sync.provider.testConnection records provider test status', async () => {
+  const restoreFetch = installMockFetch(async (input) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/rest/api/2/myself')) {
+      return jsonResponse({
+        accountId: 'user-1',
+        displayName: 'Paperclip User'
+      });
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  try {
+    const harness = createTestHarness({
+      manifest,
+      config: {}
+    });
+    await plugin.definition.setup(harness.ctx);
+
+    const result = await harness.performAction<{
+      status: string;
+      message: string;
+    }>('sync.provider.testConnection', {
+      companyId: 'company-1',
+      providerKey: 'jira',
+      config: {
+        jiraBaseUrl: 'https://jira.example.com',
+        jiraToken: 'jira-token'
+      }
+    });
+
+    const popupState = await harness.getData<{
+      connectionTest?: { status: string; message?: string };
+    }>('sync.popupState', {
+      companyId: 'company-1'
+    });
+
+    assert.equal(result.status, 'success');
+    assert.match(result.message, /Connected to Jira/);
+    assert.equal(popupState.connectionTest?.status, 'success');
+    assert.match(popupState.connectionTest?.message ?? '', /Connected to Jira/);
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('settings and popup data do not resolve Jira secrets just to render provider state', async () => {
+  const harness = createTestHarness({
+    manifest,
+    config: {
+      providers: [
+        {
+          id: 'provider-default-jira',
+          type: 'jira',
+          name: 'Default Jira',
+          jiraBaseUrl: 'https://jira.example.com',
+          jiraTokenRef: 'secret:jira'
+        }
+      ]
+    } as any
+  });
+  await plugin.definition.setup(harness.ctx);
+
+  let resolveCalls = 0;
+  harness.ctx.secrets.resolve = async () => {
+    resolveCalls += 1;
+    return 'jira-token';
+  };
+
+  harness.seed({
+    projects: [makeProject()]
+  });
+
+  await harness.performAction('settings.saveRegistration', {
+    companyId: 'company-1',
+    scheduleFrequencyMinutes: 15,
+    mappings: [
+      {
+        providerId: 'provider-default-jira',
+        jiraProjectKey: 'GRB',
+        paperclipProjectId: 'project-1',
+        paperclipProjectName: 'Alpha'
+      }
+    ]
+  });
+
+  await harness.getData('sync.providers', { companyId: 'company-1' });
+  await harness.getData('sync.popupState', {
+    companyId: 'company-1',
+    providerId: 'provider-default-jira'
+  });
+
+  assert.equal(resolveCalls, 0);
 });
 
 test('sync.runNow imports Jira issues into mapped Paperclip projects', async () => {
@@ -245,6 +434,212 @@ test('sync.runNow imports Jira issues into mapped Paperclip projects', async () 
     assert.equal(importedIssues.length, 1);
     assert.match(importedIssues[0]?.description ?? '', /paperclip-jira-plugin-upstream: GRB-461/);
     assert.equal(importedIssues[0]?.status, 'todo');
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('sync.runNow unhides a previously hidden imported Jira issue when it reappears upstream', async () => {
+  const restoreFetch = installMockFetch(async (input) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/rest/api/2/search')) {
+      return jsonResponse({
+        issues: [
+          {
+            id: '10001',
+            key: 'GRB-461',
+            fields: {
+              summary: 'Imported from Jira',
+              description: {
+                type: 'doc',
+                version: 1,
+                content: [
+                  {
+                    type: 'paragraph',
+                    content: [
+                      {
+                        type: 'text',
+                        text: 'Remote body'
+                      }
+                    ]
+                  }
+                ]
+              },
+              status: {
+                name: 'Backlog',
+                statusCategory: {
+                  name: 'To Do'
+                }
+              },
+              comment: {
+                comments: []
+              },
+              updated: '2026-04-21T13:08:38.000+0000',
+              created: '2026-04-21T13:03:54.000+0000',
+              issuetype: {
+                name: 'Task'
+              }
+            }
+          }
+        ]
+      });
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  try {
+    const harness = createTestHarness({
+      manifest,
+      config: {
+        jiraBaseUrl: 'https://jira.example.com',
+        jiraToken: 'jira-token'
+      } as any
+    });
+    await plugin.definition.setup(harness.ctx);
+
+    harness.seed({
+      projects: [makeProject()],
+      issues: [
+        makeIssue({
+          id: 'issue-hidden-sync',
+          projectId: 'project-1',
+          title: '[GRB-461] Imported from Jira',
+          description: 'Remote body\n\n<!-- paperclip-jira-plugin-upstream: GRB-461 -->',
+          hiddenAt: new Date('2026-04-21T00:00:00.000Z')
+        })
+      ]
+    });
+
+    await harness.performAction('settings.saveRegistration', {
+      companyId: 'company-1',
+      mappings: [
+        {
+          jiraProjectKey: 'GRB',
+          paperclipProjectId: 'project-1',
+          paperclipProjectName: 'Alpha'
+        }
+      ]
+    });
+
+    await harness.ctx.entities.upsert({
+      entityType: 'paperclip-jira-plugin.issue-link',
+      scopeKind: 'issue',
+      scopeId: 'issue-hidden-sync',
+      externalId: 'GRB-461',
+      title: 'GRB-461',
+      status: 'Backlog',
+      data: {
+        issueId: 'issue-hidden-sync',
+        companyId: 'company-1',
+        projectId: 'project-1',
+        jiraIssueId: '10001',
+        jiraIssueKey: 'GRB-461',
+        jiraProjectKey: 'GRB',
+        jiraUrl: 'https://jira.example.com/browse/GRB-461',
+        jiraStatusName: 'Backlog',
+        jiraStatusCategory: 'To Do',
+        lastSyncedAt: '2026-04-21T13:08:38.000Z',
+        lastPulledAt: '2026-04-21T13:08:38.000Z',
+        source: 'jira'
+      }
+    });
+
+    const syncState = await harness.performAction<{
+      status: string;
+      updatedCount?: number;
+    }>('sync.runNow', {
+      companyId: 'company-1'
+    });
+
+    const reloadedIssue = await harness.ctx.issues.get('issue-hidden-sync', 'company-1');
+
+    assert.equal(syncState.status, 'success');
+    assert.equal(syncState.updatedCount, 1);
+    assert.equal(reloadedIssue?.hiddenAt, null);
+    assert.equal(reloadedIssue?.title, '[GRB-461] Imported from Jira');
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('sync.runNow matches a scoped project even when an older mapping only saved the Paperclip project name', async () => {
+  const restoreFetch = installMockFetch(async (input) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/rest/api/2/search')) {
+      return jsonResponse({
+        issues: [
+          {
+            id: '10021',
+            key: 'GRB-480',
+            fields: {
+              summary: 'Imported from legacy mapping',
+              description: { type: 'doc', version: 1, content: [] },
+              status: {
+                name: 'Backlog',
+                statusCategory: { name: 'To Do' }
+              },
+              comment: {
+                comments: []
+              },
+              updated: '2026-04-21T13:08:38.000+0000',
+              created: '2026-04-21T13:03:54.000+0000',
+              issuetype: { name: 'Task' }
+            }
+          }
+        ]
+      });
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  try {
+    const harness = createTestHarness({
+      manifest,
+      config: {
+        jiraBaseUrl: 'https://jira.example.com',
+        jiraToken: 'jira-token'
+      } as any
+    });
+    await plugin.definition.setup(harness.ctx);
+
+    harness.seed({
+      projects: [makeProject()]
+    });
+
+    await harness.ctx.state.set(
+      { scopeKind: 'instance', stateKey: 'paperclip-jira-plugin-settings' },
+      {
+        mappings: [
+          {
+            id: 'mapping-legacy',
+            companyId: 'company-1',
+            jiraProjectKey: 'GRB',
+            paperclipProjectName: 'Alpha'
+          }
+        ]
+      }
+    );
+
+    const syncState = await harness.performAction<{
+      status: string;
+      importedCount?: number;
+      message?: string;
+    }>('sync.runNow', {
+      companyId: 'company-1',
+      projectId: 'project-1'
+    });
+
+    const importedIssues = await harness.ctx.issues.list({
+      companyId: 'company-1',
+      projectId: 'project-1'
+    });
+
+    assert.equal(syncState.status, 'success');
+    assert.equal(syncState.importedCount, 1);
+    assert.equal(importedIssues.length, 1);
+    assert.equal(importedIssues[0]?.title, '[GRB-480] Imported from legacy mapping');
   } finally {
     restoreFetch();
   }
@@ -474,7 +869,7 @@ test('issue.pushToJira creates an upstream issue and stores link metadata', asyn
         key: 'GRB-999'
       }, 201);
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-999?fields=summary,description,status,comment,updated,created,issuetype')) {
+    if (url.endsWith('/rest/api/2/issue/GRB-999?fields=summary,description,status,comment,updated,created,issuetype,assignee')) {
       return jsonResponse({
         id: '10002',
         key: 'GRB-999',
@@ -494,12 +889,23 @@ test('issue.pushToJira creates an upstream issue and stores link metadata', asyn
           comment: {
             comments: []
           },
+          assignee: {
+            displayName: 'Paperclip Owner'
+          },
           updated: '2026-04-21T13:08:38.000+0000',
           created: '2026-04-21T13:03:54.000+0000',
           issuetype: {
             name: 'Task'
           }
         }
+      });
+    }
+    if (url.endsWith('/rest/api/2/issue/GRB-999/transitions')) {
+      return jsonResponse({
+        transitions: [
+          { id: '31', name: 'Done' },
+          { id: '41', name: 'Backlog' }
+        ]
       });
     }
 
@@ -561,4 +967,700 @@ test('issue.pushToJira creates an upstream issue and stores link metadata', asyn
   } finally {
     restoreFetch();
   }
+});
+
+test('sync.runNow reports progress counts and prefixes synced issue titles', async () => {
+  const restoreFetch = installMockFetch(async (input) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/rest/api/2/search')) {
+      return jsonResponse({
+        issues: [
+          {
+            id: '10011',
+            key: 'GRB-470',
+            fields: {
+              summary: 'Provider aware import',
+              description: { type: 'doc', version: 1, content: [] },
+              status: {
+                name: 'Backlog',
+                statusCategory: { name: 'To Do' }
+              },
+              comment: {
+                comments: []
+              },
+              updated: '2026-04-21T13:08:38.000+0000',
+              created: '2026-04-21T13:03:54.000+0000',
+              issuetype: { name: 'Task' }
+            }
+          }
+        ]
+      });
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  try {
+    const harness = createTestHarness({
+      manifest,
+      config: {
+        jiraBaseUrl: 'https://jira.example.com',
+        jiraToken: 'jira-token'
+      } as any
+    });
+    await plugin.definition.setup(harness.ctx);
+
+    harness.seed({
+      projects: [makeProject()]
+    });
+
+    await harness.performAction('settings.saveRegistration', {
+      companyId: 'company-1',
+      mappings: [
+        {
+          jiraProjectKey: 'GRB',
+          paperclipProjectId: 'project-1',
+          paperclipProjectName: 'Alpha'
+        }
+      ]
+    });
+
+    const syncState = await harness.performAction<{
+      status: string;
+      processedCount?: number;
+      totalCount?: number;
+      importedCount?: number;
+    }>('sync.runNow', {
+      companyId: 'company-1',
+      providerKey: 'jira',
+      filters: {
+        onlyActive: true
+      }
+    });
+
+    const importedIssues = await harness.ctx.issues.list({
+      companyId: 'company-1',
+      projectId: 'project-1'
+    });
+
+    assert.equal(syncState.status, 'success');
+    assert.equal(syncState.processedCount, 1);
+    assert.equal(syncState.totalCount, 1);
+    assert.equal(syncState.importedCount, 1);
+    assert.equal(importedIssues[0]?.title, '[GRB-470] Provider aware import');
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('issue sync presentation keeps local and upstream state separate and exposes open-in-jira action', async () => {
+  const restoreFetch = installMockFetch(async (input, init) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/rest/api/2/issue') && init?.method === 'POST') {
+      return jsonResponse({
+        id: '10002',
+        key: 'GRB-999'
+      }, 201);
+    }
+    if (url.endsWith('/rest/api/2/issue/GRB-999?fields=summary,description,status,comment,updated,created,issuetype,assignee')) {
+      return jsonResponse({
+        id: '10002',
+        key: 'GRB-999',
+        fields: {
+          summary: 'Local Paperclip issue',
+          description: { type: 'doc', version: 1, content: [] },
+          status: {
+            name: 'In Progress',
+            statusCategory: { name: 'In Progress' }
+          },
+          comment: {
+            comments: []
+          },
+          assignee: {
+            displayName: 'Paperclip Owner'
+          },
+          updated: '2026-04-21T13:08:38.000+0000',
+          created: '2026-04-21T13:03:54.000+0000',
+          issuetype: { name: 'Task' }
+        }
+      });
+    }
+    if (url.endsWith('/rest/api/2/issue/GRB-999/transitions')) {
+      return jsonResponse({
+        transitions: [
+          { id: '31', name: 'Done' },
+          { id: '41', name: 'Backlog' }
+        ]
+      });
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  try {
+    const harness = createTestHarness({
+      manifest,
+      config: {
+        jiraBaseUrl: 'https://jira.example.com',
+        jiraToken: 'jira-token'
+      } as any
+    });
+    await plugin.definition.setup(harness.ctx);
+
+    harness.seed({
+      projects: [makeProject()],
+      issues: [makeIssue({ status: 'blocked' })]
+    });
+
+    await harness.performAction('settings.saveRegistration', {
+      companyId: 'company-1',
+      mappings: [
+        {
+          jiraProjectKey: 'GRB',
+          paperclipProjectId: 'project-1',
+          paperclipProjectName: 'Alpha'
+        }
+      ]
+    });
+
+    await harness.performAction('issue.pushToJira', {
+      companyId: 'company-1',
+      issueId: 'issue-1'
+    });
+
+    const presentation = await harness.getData<{
+      isSynced: boolean;
+      localStatus?: string;
+      upstreamIssueKey?: string | null;
+      titlePrefix?: string | null;
+      openInProviderUrl?: string | null;
+      upstreamStatus?: { name: string; category: string };
+    }>('issue.syncPresentation', {
+      companyId: 'company-1',
+      issueId: 'issue-1'
+    });
+
+    const reloadedIssue = await harness.ctx.issues.get('issue-1', 'company-1');
+
+    assert.equal(presentation.isSynced, true);
+    assert.equal(presentation.localStatus, 'blocked');
+    assert.equal(presentation.upstreamIssueKey, 'GRB-999');
+    assert.equal(presentation.titlePrefix, '[GRB-999]');
+    assert.equal(presentation.upstreamStatus?.name, 'In Progress');
+    assert.equal(presentation.upstreamStatus?.category, 'In Progress');
+    assert.equal(presentation.openInProviderUrl, 'https://jira.example.com/browse/GRB-999');
+    assert.equal(reloadedIssue?.title, '[GRB-999] Local Paperclip issue');
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('issue.setUpstreamStatus transitions the Jira issue and refreshes upstream metadata', async () => {
+  let transitioned = false;
+  const restoreFetch = installMockFetch(async (input, init) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/rest/api/2/issue') && init?.method === 'POST') {
+      return jsonResponse({
+        id: '10002',
+        key: 'GRB-999'
+      }, 201);
+    }
+    if (url.endsWith('/rest/api/2/issue/GRB-999?fields=summary,description,status,comment,updated,created,issuetype,assignee')) {
+      return jsonResponse({
+        id: '10002',
+        key: 'GRB-999',
+        fields: {
+          summary: 'Local Paperclip issue',
+          description: { type: 'doc', version: 1, content: [] },
+          status: transitioned
+            ? { name: 'Done', statusCategory: { name: 'Done' } }
+            : { name: 'Backlog', statusCategory: { name: 'To Do' } },
+          comment: {
+            comments: []
+          },
+          assignee: {
+            displayName: 'Paperclip Owner'
+          },
+          updated: '2026-04-21T13:08:38.000+0000',
+          created: '2026-04-21T13:03:54.000+0000',
+          issuetype: { name: 'Task' }
+        }
+      });
+    }
+    if (url.endsWith('/rest/api/2/issue/GRB-999/transitions') && (!init?.method || init.method === 'GET')) {
+      return jsonResponse({
+        transitions: [
+          { id: '31', name: 'Done' },
+          { id: '41', name: 'Backlog' }
+        ]
+      });
+    }
+    if (url.endsWith('/rest/api/2/issue/GRB-999/transitions') && init?.method === 'POST') {
+      transitioned = true;
+      return new Response(null, { status: 204 });
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  try {
+    const harness = createTestHarness({
+      manifest,
+      config: {
+        jiraBaseUrl: 'https://jira.example.com',
+        jiraToken: 'jira-token'
+      } as any
+    });
+    await plugin.definition.setup(harness.ctx);
+
+    harness.seed({
+      projects: [makeProject()],
+      issues: [makeIssue()]
+    });
+
+    await harness.performAction('settings.saveRegistration', {
+      companyId: 'company-1',
+      mappings: [
+        {
+          jiraProjectKey: 'GRB',
+          paperclipProjectId: 'project-1',
+          paperclipProjectName: 'Alpha'
+        }
+      ]
+    });
+
+    await harness.performAction('issue.pushToJira', {
+      companyId: 'company-1',
+      issueId: 'issue-1'
+    });
+
+    const result = await harness.performAction<{ message: string }>('issue.setUpstreamStatus', {
+      companyId: 'company-1',
+      issueId: 'issue-1',
+      transitionId: '31'
+    });
+
+    const presentation = await harness.getData<{
+      upstreamStatus?: { name: string; category: string };
+      upstream?: { jiraAssigneeDisplayName?: string };
+    }>('issue.syncPresentation', {
+      companyId: 'company-1',
+      issueId: 'issue-1'
+    });
+
+    assert.match(result.message, /Updated Jira status to Done/);
+    assert.equal(presentation.upstreamStatus?.name, 'Done');
+    assert.equal(presentation.upstreamStatus?.category, 'Done');
+    assert.equal(presentation.upstream?.jiraAssigneeDisplayName, 'Paperclip Owner');
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('comment sync presentation marks fetched comments and local comments separately', async () => {
+  const restoreFetch = installMockFetch(async (input, init) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/rest/api/2/issue') && init?.method === 'POST') {
+      return jsonResponse({
+        id: '10002',
+        key: 'GRB-999'
+      }, 201);
+    }
+    if (url.endsWith('/rest/api/2/issue/GRB-999?fields=summary,description,status,comment,updated,created,issuetype,assignee')) {
+      return jsonResponse({
+        id: '10002',
+        key: 'GRB-999',
+        fields: {
+          summary: 'Local Paperclip issue',
+          description: { type: 'doc', version: 1, content: [] },
+          status: {
+            name: 'Backlog',
+            statusCategory: { name: 'To Do' }
+          },
+          comment: {
+            comments: [
+              {
+                id: 'comment-remote-1',
+                body: {
+                  type: 'doc',
+                  version: 1,
+                  content: [
+                    {
+                      type: 'paragraph',
+                      content: [{ type: 'text', text: 'Fetched Jira comment' }]
+                    }
+                  ]
+                },
+                author: { displayName: 'Jira User' },
+                created: '2026-04-21T13:03:54.000+0000',
+                updated: '2026-04-21T13:03:54.000+0000'
+              }
+            ]
+          },
+          assignee: {
+            displayName: 'Paperclip Owner'
+          },
+          updated: '2026-04-21T13:08:38.000+0000',
+          created: '2026-04-21T13:03:54.000+0000',
+          issuetype: { name: 'Task' }
+        }
+      });
+    }
+    if (url.endsWith('/rest/api/2/issue/GRB-999/transitions')) {
+      return jsonResponse({
+        transitions: [
+          { id: '31', name: 'Done' },
+          { id: '41', name: 'Backlog' }
+        ]
+      });
+    }
+    if (url.endsWith('/rest/api/2/issue/GRB-999/comment') && init?.method === 'POST') {
+      return jsonResponse({
+        id: 'comment-remote-2'
+      }, 201);
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  try {
+    const harness = createTestHarness({
+      manifest,
+      config: {
+        jiraBaseUrl: 'https://jira.example.com',
+        jiraToken: 'jira-token'
+      } as any
+    });
+    await plugin.definition.setup(harness.ctx);
+
+    harness.seed({
+      projects: [makeProject()],
+      issues: [makeIssue()]
+    });
+
+    await harness.performAction('settings.saveRegistration', {
+      companyId: 'company-1',
+      mappings: [
+        {
+          jiraProjectKey: 'GRB',
+          paperclipProjectId: 'project-1',
+          paperclipProjectName: 'Alpha'
+        }
+      ]
+    });
+
+    await harness.performAction('issue.pushToJira', {
+      companyId: 'company-1',
+      issueId: 'issue-1'
+    });
+
+    await harness.performAction('issue.pullFromJira', {
+      companyId: 'company-1',
+      issueId: 'issue-1'
+    });
+
+    const comments = await harness.ctx.issues.listComments('issue-1', 'company-1');
+    const fetchedComment = comments.find((comment) => comment.body.includes('Fetched Jira comment'));
+    assert.ok(fetchedComment);
+
+    const localComment = await harness.ctx.issues.createComment('issue-1', 'Local comment to upload', 'company-1');
+
+    const fetchedPresentation = await harness.getData<CommentSyncPresentation>('comment.syncPresentation', {
+      companyId: 'company-1',
+      issueId: 'issue-1',
+      commentId: fetchedComment.id
+    });
+    const localPresentation = await harness.getData<CommentSyncPresentation>('comment.syncPresentation', {
+      companyId: 'company-1',
+      issueId: 'issue-1',
+      commentId: localComment.id
+    });
+    const uploadResult = await harness.performAction<{
+      upstreamCommentId?: string;
+      message: string;
+    }>('comment.uploadToProvider', {
+      companyId: 'company-1',
+      issueId: 'issue-1',
+      commentId: localComment.id
+    });
+
+    const uploadedPresentation = await harness.getData<CommentSyncPresentation>('comment.syncPresentation', {
+      companyId: 'company-1',
+      issueId: 'issue-1',
+      commentId: localComment.id
+    });
+
+    assert.equal(fetchedPresentation.origin, 'provider_pull');
+    assert.equal(fetchedPresentation.uploadAvailable, false);
+    assert.equal(localPresentation.origin, 'paperclip');
+    assert.equal(localPresentation.uploadAvailable, true);
+    assert.equal(uploadResult.upstreamCommentId, 'comment-remote-2');
+    assert.equal(uploadedPresentation.origin, 'provider_push');
+    assert.equal(uploadedPresentation.uploadAvailable, false);
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('sync.findCleanupCandidates includes legacy untouched Jira imports across local Paperclip statuses', async () => {
+  const harness = createTestHarness({
+    manifest,
+    config: {
+      jiraBaseUrl: 'https://jira.example.com',
+      jiraToken: 'jira-token'
+    } as any
+  });
+  await plugin.definition.setup(harness.ctx);
+
+  harness.seed({
+    projects: [makeProject()],
+    issues: [
+      makeIssue({
+        id: 'issue-legacy-import',
+        title: '[GRB-777] Legacy imported Jira issue',
+        description: 'Imported body\n\n<!-- paperclip-jira-plugin-upstream: GRB-777 -->',
+        status: 'backlog'
+      })
+    ]
+  });
+
+  await harness.performAction('settings.saveRegistration', {
+    companyId: 'company-1',
+    scheduleFrequencyMinutes: 15,
+    mappings: [
+      {
+        providerId: 'provider-default-jira',
+        jiraProjectKey: 'GRB',
+        paperclipProjectId: 'project-1',
+        paperclipProjectName: 'Alpha'
+      }
+    ]
+  });
+
+  await harness.ctx.entities.upsert({
+    entityType: 'paperclip-jira-plugin.issue-link',
+    scopeKind: 'issue',
+    scopeId: 'issue-legacy-import',
+    externalId: 'GRB-777',
+    title: 'GRB-777',
+    status: 'Backlog',
+    data: {
+      issueId: 'issue-legacy-import',
+      companyId: 'company-1',
+      projectId: 'project-1',
+      jiraIssueId: '10077',
+      jiraIssueKey: 'GRB-777',
+      jiraProjectKey: 'GRB',
+      jiraUrl: 'https://jira.example.com/browse/GRB-777',
+      jiraStatusName: 'Backlog',
+      jiraStatusCategory: 'To Do',
+      lastSyncedAt: '2026-04-21T13:08:38.000Z',
+      lastPulledAt: '2026-04-21T13:08:38.000Z',
+      source: 'jira'
+    }
+  });
+
+  const result = await harness.performAction<{
+    count: number;
+    candidates: Array<{ issueId: string; jiraIssueKey: string; status: string }>;
+  }>('sync.findCleanupCandidates', {
+    companyId: 'company-1'
+  });
+
+  assert.equal(result.count, 1);
+  assert.equal(result.candidates[0]?.issueId, 'issue-legacy-import');
+  assert.equal(result.candidates[0]?.jiraIssueKey, 'GRB-777');
+  assert.equal(result.candidates[0]?.status, 'backlog');
+});
+
+test('sync.findCleanupCandidates ignores hidden imported issues', async () => {
+  const harness = createTestHarness({
+    manifest,
+    config: {
+      jiraBaseUrl: 'https://jira.example.com',
+      jiraToken: 'jira-token'
+    } as any
+  });
+  await plugin.definition.setup(harness.ctx);
+
+  harness.seed({
+    projects: [makeProject()],
+    issues: [
+      makeIssue({
+        id: 'issue-hidden-import',
+        title: '[GRB-778] Hidden imported Jira issue',
+        description: 'Imported body\n\n<!-- paperclip-jira-plugin-upstream: GRB-778 -->',
+        hiddenAt: new Date('2026-04-21T00:00:00.000Z'),
+        status: 'backlog'
+      })
+    ]
+  });
+
+  await harness.ctx.entities.upsert({
+    entityType: 'paperclip-jira-plugin.issue-link',
+    scopeKind: 'issue',
+    scopeId: 'issue-hidden-import',
+    externalId: 'GRB-778',
+    title: 'GRB-778',
+    status: 'Backlog',
+    data: {
+      issueId: 'issue-hidden-import',
+      companyId: 'company-1',
+      projectId: 'project-1',
+      jiraIssueId: '10078',
+      jiraIssueKey: 'GRB-778',
+      jiraProjectKey: 'GRB',
+      jiraUrl: 'https://jira.example.com/browse/GRB-778',
+      jiraStatusName: 'Backlog',
+      jiraStatusCategory: 'To Do',
+      lastSyncedAt: '2026-04-21T13:08:38.000Z',
+      lastPulledAt: '2026-04-21T13:08:38.000Z',
+      source: 'jira'
+    }
+  });
+
+  const result = await harness.performAction<{
+    count: number;
+    candidates: Array<{ issueId: string }>;
+  }>('sync.findCleanupCandidates', {
+    companyId: 'company-1'
+  });
+
+  assert.equal(result.count, 0);
+  assert.equal(result.candidates.length, 0);
+});
+
+test('issue sync presentation keeps a mapped local issue unsynced until it is linked', async () => {
+  const harness = createTestHarness({
+    manifest,
+    config: {
+      jiraBaseUrl: 'https://jira.example.com',
+      jiraToken: 'jira-token'
+    } as any
+  });
+  await plugin.definition.setup(harness.ctx);
+
+  harness.seed({
+    projects: [makeProject()],
+    issues: [makeIssue()]
+  });
+
+  await harness.performAction('settings.saveRegistration', {
+    companyId: 'company-1',
+    mappings: [
+      {
+        jiraProjectKey: 'GRB',
+        paperclipProjectId: 'project-1',
+        paperclipProjectName: 'Alpha'
+      }
+    ]
+  });
+
+  const presentation = await harness.getData<{
+    visible: boolean;
+    isSynced: boolean;
+    linked?: boolean;
+    upstreamIssueKey?: string | null;
+    openInProviderUrl?: string | null;
+    upstreamStatus?: { name: string; category: string };
+    mapping?: { jiraProjectKey: string };
+  }>('issue.syncPresentation', {
+    companyId: 'company-1',
+    issueId: 'issue-1'
+  });
+
+  assert.equal(presentation.visible, true);
+  assert.equal(presentation.isSynced, false);
+  assert.equal(presentation.linked, false);
+  assert.equal(presentation.upstreamIssueKey, null);
+  assert.equal(presentation.openInProviderUrl, null);
+  assert.equal(presentation.upstreamStatus, undefined);
+  assert.equal(presentation.mapping?.jiraProjectKey, 'GRB');
+});
+
+test('issue sync presentation ignores stale Jira link metadata when the issue no longer carries Jira markers', async () => {
+  const harness = createTestHarness({
+    manifest,
+    config: {
+      jiraBaseUrl: 'https://jira.example.com',
+      jiraToken: 'jira-token'
+    } as any
+  });
+  await plugin.definition.setup(harness.ctx);
+
+  harness.seed({
+    projects: [makeProject()],
+    issues: [
+      makeIssue({
+        id: 'issue-stale-link',
+        title: 'test',
+        description: ''
+      })
+    ]
+  });
+
+  await harness.performAction('settings.saveRegistration', {
+    companyId: 'company-1',
+    mappings: [
+      {
+        jiraProjectKey: 'GRB',
+        paperclipProjectId: 'project-1',
+        paperclipProjectName: 'Alpha'
+      }
+    ]
+  });
+
+  await harness.ctx.entities.upsert({
+    entityType: 'paperclip-jira-plugin.issue-link',
+    scopeKind: 'issue',
+    scopeId: 'issue-stale-link',
+    externalId: 'GRB-461',
+    title: 'GRB-461',
+    status: 'In Review',
+    data: {
+      issueId: 'issue-stale-link',
+      companyId: 'company-1',
+      projectId: 'project-1',
+      jiraIssueId: '10001',
+      jiraIssueKey: 'GRB-461',
+      jiraProjectKey: 'GRB',
+      jiraUrl: 'https://jira.example.com/browse/GRB-461',
+      jiraAssigneeDisplayName: 'Andriy Dmytruk',
+      jiraStatusName: 'In Review',
+      jiraStatusCategory: 'In Progress',
+      lastSyncedAt: '2026-04-21T17:50:14.000Z',
+      lastPulledAt: '2026-04-21T17:50:14.000Z',
+      source: 'jira'
+    }
+  });
+
+  const presentation = await harness.getData<{
+    visible: boolean;
+    isSynced: boolean;
+    upstreamIssueKey?: string | null;
+    openInProviderUrl?: string | null;
+    upstreamStatus?: { name: string; category: string };
+  }>('issue.syncPresentation', {
+    companyId: 'company-1',
+    issueId: 'issue-stale-link'
+  });
+
+  assert.equal(presentation.visible, true);
+  assert.equal(presentation.isSynced, false);
+  assert.equal(presentation.upstreamIssueKey, null);
+  assert.equal(presentation.openInProviderUrl, null);
+  assert.equal(presentation.upstreamStatus, undefined);
+});
+
+test('ui helper labels describe sync progress and comment origin', async () => {
+  assert.equal(
+    buildSyncProgressLabel({
+      status: 'running',
+      processedCount: 2,
+      totalCount: 5
+    }),
+    '2 of 5 issues processed'
+  );
+  assert.equal(buildCommentOriginLabel('provider_pull'), 'Fetched from Jira');
+  assert.equal(buildCommentOriginLabel('paperclip'), 'Local Paperclip comment');
 });

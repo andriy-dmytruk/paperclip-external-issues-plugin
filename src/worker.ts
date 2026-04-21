@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { definePlugin, runWorker, type Issue, type IssueComment } from '@paperclipai/plugin-sdk';
+import { definePlugin, runWorker, type Issue, type IssueComment, type PluginLauncherRegistration } from '@paperclipai/plugin-sdk';
 
 const SETTINGS_SCOPE = {
   scopeKind: 'instance' as const,
@@ -14,6 +14,7 @@ const HIDDEN_ISSUE_MARKER_SUFFIX = ' -->';
 const DEFAULT_SYNC_FREQUENCY_MINUTES = 15;
 const DEFAULT_ISSUE_TYPE = 'Task';
 const COMMENT_LINKS_STATE_KEY = 'paperclip-jira-plugin-comment-links';
+const DEFAULT_PROVIDER_ID = 'provider-default-jira';
 
 type PluginSetupContext = Parameters<Parameters<typeof definePlugin>[0]['setup']>[0];
 type PaperclipIssueStatus = Issue['status'];
@@ -21,16 +22,20 @@ type PaperclipIssueStatus = Issue['status'];
 interface JiraMapping {
   id: string;
   companyId?: string;
+  providerId?: string;
   jiraProjectKey: string;
   jiraJql?: string;
   paperclipProjectId?: string;
   paperclipProjectName: string;
+  filters?: JiraTaskFilters;
 }
 
 interface SyncRunState {
   status: 'idle' | 'running' | 'success' | 'error';
   message?: string;
   checkedAt?: string;
+  processedCount?: number;
+  totalCount?: number;
   importedCount?: number;
   updatedCount?: number;
   skippedCount?: number;
@@ -38,18 +43,68 @@ interface SyncRunState {
   lastRunTrigger?: 'manual' | 'schedule' | 'pull' | 'push';
 }
 
+interface ConnectionTestState {
+  status: 'idle' | 'testing' | 'success' | 'error';
+  message?: string;
+  checkedAt?: string;
+  providerKey?: 'jira';
+}
+
+interface JiraTaskFilters {
+  onlyActive?: boolean;
+  author?: string;
+  assignee?: string;
+  issueNumberGreaterThan?: number;
+  issueNumberLessThan?: number;
+}
+
 interface JiraSyncSettings {
   mappings: JiraMapping[];
   syncStateByCompanyId?: Record<string, SyncRunState>;
   scheduleFrequencyMinutesByCompanyId?: Record<string, number>;
+  filtersByCompanyId?: Record<string, JiraTaskFilters>;
+  connectionTestByCompanyId?: Record<string, ConnectionTestState>;
   updatedAt?: string;
 }
 
 interface JiraConfig {
+  providerId: string;
+  providerName: string;
   baseUrl?: string;
   userEmail?: string;
   token?: string;
   defaultIssueType: string;
+}
+
+interface JiraProviderDisplayConfig {
+  providerId: string;
+  providerName: string;
+  baseUrl?: string;
+  userEmail?: string;
+  defaultIssueType: string;
+  tokenSaved: boolean;
+}
+
+interface JiraProviderConfigRecord {
+  id?: string;
+  type?: string;
+  name?: string;
+  jiraBaseUrl?: string;
+  jiraUserEmail?: string;
+  jiraToken?: string;
+  jiraTokenRef?: string;
+  defaultIssueType?: string;
+}
+
+interface JiraProviderConfig {
+  id: string;
+  type: 'jira';
+  name: string;
+  jiraBaseUrl?: string;
+  jiraUserEmail?: string;
+  jiraToken?: string;
+  jiraTokenRef?: string;
+  defaultIssueType?: string;
 }
 
 interface JiraIssueRecord {
@@ -57,6 +112,7 @@ interface JiraIssueRecord {
   key: string;
   summary: string;
   description: string;
+  assigneeDisplayName?: string;
   statusName: string;
   statusCategory: string;
   updatedAt: string;
@@ -78,10 +134,12 @@ interface JiraIssueLinkData {
   issueId: string;
   companyId: string;
   projectId?: string;
+  providerId?: string;
   jiraIssueId: string;
   jiraIssueKey: string;
   jiraProjectKey: string;
   jiraUrl: string;
+  jiraAssigneeDisplayName?: string;
   jiraStatusName: string;
   jiraStatusCategory: string;
   lastSyncedAt: string;
@@ -89,6 +147,8 @@ interface JiraIssueLinkData {
   lastPushedAt?: string;
   linkedCommentCount?: number;
   source: 'jira' | 'paperclip';
+  importedTitleHash?: string;
+  importedDescriptionHash?: string;
 }
 
 interface JiraCommentLinkData {
@@ -100,6 +160,37 @@ interface JiraCommentLinkData {
   direction: 'pull' | 'push';
   lastSyncedAt: string;
 }
+
+const GLOBAL_SYNC_LAUNCHER: PluginLauncherRegistration = {
+  id: 'paperclip-jira-plugin-global-runtime-launcher',
+  displayName: 'Sync Issues',
+  description: 'Open the issue sync dialog.',
+  placementZone: 'globalToolbarButton',
+  action: {
+    type: 'openModal',
+    target: 'JiraSyncLauncherModal'
+  },
+  render: {
+    environment: 'hostOverlay',
+    bounds: 'wide'
+  }
+};
+
+const ENTITY_SYNC_LAUNCHER: PluginLauncherRegistration = {
+  id: 'paperclip-jira-plugin-entity-runtime-launcher',
+  displayName: 'Sync Issues',
+  description: 'Open the issue sync dialog for the current entity.',
+  placementZone: 'toolbarButton',
+  entityTypes: ['project', 'issue'],
+  action: {
+    type: 'openModal',
+    target: 'JiraSyncLauncherModal'
+  },
+  render: {
+    environment: 'hostOverlay',
+    bounds: 'wide'
+  }
+};
 
 function normalizeOptionalString(value: unknown): string | undefined {
   if (typeof value !== 'string') {
@@ -128,6 +219,8 @@ function normalizeSyncState(value: unknown): SyncRunState {
         : 'idle',
     ...(normalizeOptionalString(record.message) ? { message: normalizeOptionalString(record.message) } : {}),
     ...(normalizeOptionalString(record.checkedAt) ? { checkedAt: normalizeOptionalString(record.checkedAt) } : {}),
+    ...(typeof record.processedCount === 'number' ? { processedCount: record.processedCount } : {}),
+    ...(typeof record.totalCount === 'number' ? { totalCount: record.totalCount } : {}),
     ...(typeof record.importedCount === 'number' ? { importedCount: record.importedCount } : {}),
     ...(typeof record.updatedCount === 'number' ? { updatedCount: record.updatedCount } : {}),
     ...(typeof record.skippedCount === 'number' ? { skippedCount: record.skippedCount } : {}),
@@ -135,6 +228,78 @@ function normalizeSyncState(value: unknown): SyncRunState {
     ...(record.lastRunTrigger === 'manual' || record.lastRunTrigger === 'schedule' || record.lastRunTrigger === 'pull' || record.lastRunTrigger === 'push'
       ? { lastRunTrigger: record.lastRunTrigger }
       : {})
+  };
+}
+
+function normalizeConnectionTestState(value: unknown): ConnectionTestState {
+  if (!value || typeof value !== 'object') {
+    return { status: 'idle' };
+  }
+
+  const record = value as Record<string, unknown>;
+  return {
+    status:
+      record.status === 'testing' || record.status === 'success' || record.status === 'error'
+        ? record.status
+        : 'idle',
+    ...(normalizeOptionalString(record.message) ? { message: normalizeOptionalString(record.message) } : {}),
+    ...(normalizeOptionalString(record.checkedAt) ? { checkedAt: normalizeOptionalString(record.checkedAt) } : {}),
+    ...(record.providerKey === 'jira' ? { providerKey: 'jira' as const } : {})
+  };
+}
+
+function normalizeFilterNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.max(0, Math.round(value));
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : undefined;
+  }
+  return undefined;
+}
+
+function normalizeTaskFilters(value: unknown): JiraTaskFilters {
+  if (!value || typeof value !== 'object') {
+    return {};
+  }
+
+  const record = value as Record<string, unknown>;
+  return {
+    ...(typeof record.onlyActive === 'boolean' ? { onlyActive: record.onlyActive } : {}),
+    ...(normalizeOptionalString(record.author) ? { author: normalizeOptionalString(record.author) } : {}),
+    ...(normalizeOptionalString(record.assignee) ? { assignee: normalizeOptionalString(record.assignee) } : {}),
+    ...(normalizeFilterNumber(record.issueNumberGreaterThan) !== undefined
+      ? { issueNumberGreaterThan: normalizeFilterNumber(record.issueNumberGreaterThan) }
+      : {}),
+    ...(normalizeFilterNumber(record.issueNumberLessThan) !== undefined
+      ? { issueNumberLessThan: normalizeFilterNumber(record.issueNumberLessThan) }
+      : {})
+  };
+}
+
+function normalizeProviderConfig(value: unknown, index: number): JiraProviderConfig | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const type = normalizeOptionalString(record.type);
+  const name = normalizeOptionalString(record.name);
+  const id = normalizeOptionalString(record.id);
+  if ((type && type !== 'jira') || !name) {
+    return null;
+  }
+
+  return {
+    id: id ?? `provider-${index + 1}`,
+    type: 'jira',
+    name,
+    ...(normalizeOptionalString(record.jiraBaseUrl) ? { jiraBaseUrl: normalizeOptionalString(record.jiraBaseUrl) } : {}),
+    ...(normalizeOptionalString(record.jiraUserEmail) ? { jiraUserEmail: normalizeOptionalString(record.jiraUserEmail) } : {}),
+    ...(normalizeOptionalString(record.jiraToken) ? { jiraToken: normalizeOptionalString(record.jiraToken) } : {}),
+    ...(normalizeOptionalString(record.jiraTokenRef) ? { jiraTokenRef: normalizeOptionalString(record.jiraTokenRef) } : {}),
+    ...(normalizeOptionalString(record.defaultIssueType) ? { defaultIssueType: normalizeOptionalString(record.defaultIssueType) } : {})
   };
 }
 
@@ -155,10 +320,52 @@ function normalizeMapping(value: unknown, index: number): JiraMapping | null {
     id: normalizeOptionalString(record.id) ?? `mapping-${index + 1}`,
     jiraProjectKey,
     paperclipProjectName,
+    ...(normalizeOptionalString(record.providerId) ? { providerId: normalizeOptionalString(record.providerId) } : {}),
     ...(normalizeOptionalString(record.jiraJql) ? { jiraJql: normalizeOptionalString(record.jiraJql) } : {}),
     ...(normalizeOptionalString(record.paperclipProjectId) ? { paperclipProjectId: normalizeOptionalString(record.paperclipProjectId) } : {}),
+    ...(record.filters ? { filters: normalizeTaskFilters(record.filters) } : {}),
     ...(normalizeCompanyId(record.companyId) ? { companyId: normalizeCompanyId(record.companyId) } : {})
   };
+}
+
+function hasLegacyProviderConfig(value: Record<string, unknown>): boolean {
+  return Boolean(
+    normalizeOptionalString(value.jiraBaseUrl)
+    || normalizeOptionalString(value.jiraUserEmail)
+    || normalizeOptionalString(value.jiraToken)
+    || normalizeOptionalString(value.jiraTokenRef)
+    || normalizeOptionalString(value.defaultIssueType)
+  );
+}
+
+function getProvidersFromConfig(value: unknown): JiraProviderConfig[] {
+  if (!value || typeof value !== 'object') {
+    return [];
+  }
+
+  const record = value as Record<string, unknown>;
+  const rawProviders = Array.isArray(record.providers) ? record.providers : [];
+  const providers = rawProviders
+    .map((entry, index) => normalizeProviderConfig(entry, index))
+    .filter((entry): entry is JiraProviderConfig => entry !== null);
+  if (providers.length > 0) {
+    return providers;
+  }
+
+  if (!hasLegacyProviderConfig(record)) {
+    return [];
+  }
+
+  return [{
+    id: DEFAULT_PROVIDER_ID,
+    type: 'jira',
+    name: 'Default Jira',
+    ...(normalizeOptionalString(record.jiraBaseUrl) ? { jiraBaseUrl: normalizeOptionalString(record.jiraBaseUrl) } : {}),
+    ...(normalizeOptionalString(record.jiraUserEmail) ? { jiraUserEmail: normalizeOptionalString(record.jiraUserEmail) } : {}),
+    ...(normalizeOptionalString(record.jiraToken) ? { jiraToken: normalizeOptionalString(record.jiraToken) } : {}),
+    ...(normalizeOptionalString(record.jiraTokenRef) ? { jiraTokenRef: normalizeOptionalString(record.jiraTokenRef) } : {}),
+    ...(normalizeOptionalString(record.defaultIssueType) ? { defaultIssueType: normalizeOptionalString(record.defaultIssueType) } : {})
+  }];
 }
 
 function normalizeSettings(value: unknown): JiraSyncSettings {
@@ -178,6 +385,14 @@ function normalizeSettings(value: unknown): JiraSyncSettings {
     record.syncStateByCompanyId && typeof record.syncStateByCompanyId === 'object'
       ? record.syncStateByCompanyId as Record<string, unknown>
       : {};
+  const filtersByCompanyId =
+    record.filtersByCompanyId && typeof record.filtersByCompanyId === 'object'
+      ? record.filtersByCompanyId as Record<string, unknown>
+      : {};
+  const connectionTestByCompanyId =
+    record.connectionTestByCompanyId && typeof record.connectionTestByCompanyId === 'object'
+      ? record.connectionTestByCompanyId as Record<string, unknown>
+      : {};
 
   return {
     mappings: rawMappings
@@ -190,6 +405,12 @@ function normalizeSettings(value: unknown): JiraSyncSettings {
     ),
     syncStateByCompanyId: Object.fromEntries(
       Object.entries(syncStateByCompanyId).map(([companyId, syncState]) => [companyId, normalizeSyncState(syncState)])
+    ),
+    filtersByCompanyId: Object.fromEntries(
+      Object.entries(filtersByCompanyId).map(([companyId, filters]) => [companyId, normalizeTaskFilters(filters)])
+    ),
+    connectionTestByCompanyId: Object.fromEntries(
+      Object.entries(connectionTestByCompanyId).map(([companyId, state]) => [companyId, normalizeConnectionTestState(state)])
     ),
     ...(normalizeOptionalString(record.updatedAt) ? { updatedAt: normalizeOptionalString(record.updatedAt) } : {})
   };
@@ -212,6 +433,75 @@ function getMappingsForCompany(settings: JiraSyncSettings, companyId?: string): 
   return settings.mappings.filter((mapping) => mapping.companyId === companyId);
 }
 
+async function getAvailableProviders(ctx: PluginSetupContext): Promise<JiraProviderConfig[]> {
+  return getProvidersFromConfig(await ctx.config.get());
+}
+
+async function getMappingProviderId(
+  ctx: PluginSetupContext,
+  mapping: JiraMapping
+): Promise<string | undefined> {
+  if (mapping.providerId) {
+    return mapping.providerId;
+  }
+
+  const providers = await getAvailableProviders(ctx);
+  return providers[0]?.id;
+}
+
+function normalizeProjectName(value: string | undefined): string | undefined {
+  return value?.trim().toLowerCase();
+}
+
+async function findProjectById(
+  ctx: PluginSetupContext,
+  companyId: string,
+  projectId: string | undefined
+): Promise<{ id: string; name: string } | null> {
+  if (!projectId) {
+    return null;
+  }
+
+  const projects = await ctx.projects.list({ companyId });
+  const project = projects.find((entry) => entry.id === projectId);
+  return project ? { id: project.id, name: project.name } : null;
+}
+
+async function resolvePaperclipProjectForMapping(
+  ctx: PluginSetupContext,
+  companyId: string,
+  mapping: JiraMapping
+): Promise<{ id: string; name: string } | null> {
+  const projects = await ctx.projects.list({ companyId });
+
+  if (mapping.paperclipProjectId) {
+    const matchedById = projects.find((project) => project.id === mapping.paperclipProjectId);
+    if (matchedById) {
+      return { id: matchedById.id, name: matchedById.name };
+    }
+  }
+
+  const normalizedName = normalizeProjectName(mapping.paperclipProjectName);
+  if (!normalizedName) {
+    return null;
+  }
+
+  const matchedByName = projects.find((project) => normalizeProjectName(project.name) === normalizedName);
+  return matchedByName ? { id: matchedByName.id, name: matchedByName.name } : null;
+}
+
+function mappingMatchesProject(mapping: JiraMapping, project: { id: string; name: string } | null): boolean {
+  if (!project) {
+    return false;
+  }
+
+  if (mapping.paperclipProjectId && mapping.paperclipProjectId === project.id) {
+    return true;
+  }
+
+  return normalizeProjectName(mapping.paperclipProjectName) === normalizeProjectName(project.name);
+}
+
 function getSyncStateForCompany(settings: JiraSyncSettings, companyId?: string): SyncRunState {
   if (!companyId) {
     return { status: 'idle' };
@@ -226,6 +516,22 @@ function getScheduleFrequencyMinutes(settings: JiraSyncSettings, companyId?: str
   }
 
   return settings.scheduleFrequencyMinutesByCompanyId?.[companyId] ?? DEFAULT_SYNC_FREQUENCY_MINUTES;
+}
+
+function getFiltersForCompany(settings: JiraSyncSettings, companyId?: string): JiraTaskFilters {
+  if (!companyId) {
+    return {};
+  }
+
+  return normalizeTaskFilters(settings.filtersByCompanyId?.[companyId]);
+}
+
+function getConnectionTestStateForCompany(settings: JiraSyncSettings, companyId?: string): ConnectionTestState {
+  if (!companyId) {
+    return { status: 'idle' };
+  }
+
+  return settings.connectionTestByCompanyId?.[companyId] ?? { status: 'idle' };
 }
 
 async function saveSettings(ctx: PluginSetupContext, settings: JiraSyncSettings): Promise<void> {
@@ -257,18 +563,94 @@ async function saveSyncState(
   return next;
 }
 
-async function getResolvedConfig(ctx: PluginSetupContext): Promise<JiraConfig> {
-  const config = await ctx.config.get();
+async function saveConnectionTestState(
+  ctx: PluginSetupContext,
+  settings: JiraSyncSettings,
+  companyId: string | undefined,
+  connectionTest: ConnectionTestState
+): Promise<JiraSyncSettings> {
+  if (!companyId) {
+    return settings;
+  }
+
+  const next: JiraSyncSettings = {
+    ...settings,
+    connectionTestByCompanyId: {
+      ...(settings.connectionTestByCompanyId ?? {}),
+      [companyId]: connectionTest
+    },
+    updatedAt: new Date().toISOString()
+  };
+  await saveSettings(ctx, next);
+  return next;
+}
+
+async function getResolvedConfig(
+  ctx: PluginSetupContext,
+  providerId?: string,
+  overrides?: JiraProviderConfigRecord
+): Promise<JiraConfig> {
+  const rawConfig = await ctx.config.get();
+  const providers = getProvidersFromConfig(rawConfig);
+  const matchedProvider =
+    (providerId ? providers.find((provider) => provider.id === providerId) : providers[0])
+    ?? providers[0]
+    ?? {
+      id: providerId ?? DEFAULT_PROVIDER_ID,
+      type: 'jira' as const,
+      name: 'Default Jira'
+    };
+  const config = {
+    ...matchedProvider,
+    ...(overrides ?? {})
+  };
   const baseUrl = normalizeOptionalString(config.jiraBaseUrl)?.replace(/\/+$/, '');
   const userEmail = normalizeOptionalString(config.jiraUserEmail);
   const tokenRef = normalizeOptionalString(config.jiraTokenRef);
-  const token = tokenRef ? await ctx.secrets.resolve(tokenRef) : undefined;
+  const inlineToken = normalizeOptionalString(config.jiraToken);
+  const token = inlineToken ?? (tokenRef ? await ctx.secrets.resolve(tokenRef) : undefined);
 
   return {
+    providerId: normalizeOptionalString(config.id) ?? matchedProvider.id,
+    providerName: normalizeOptionalString(config.name) ?? matchedProvider.name,
     ...(baseUrl ? { baseUrl } : {}),
     ...(userEmail ? { userEmail } : {}),
     ...(token ? { token } : {}),
     defaultIssueType: normalizeOptionalString(config.defaultIssueType) ?? DEFAULT_ISSUE_TYPE
+  };
+}
+
+async function getProviderDisplayConfig(
+  ctx: PluginSetupContext,
+  providerId?: string,
+  overrides?: JiraProviderConfigRecord
+): Promise<JiraProviderDisplayConfig> {
+  const rawConfig = await ctx.config.get();
+  const providers = getProvidersFromConfig(rawConfig);
+  const matchedProvider =
+    (providerId ? providers.find((provider) => provider.id === providerId) : providers[0])
+    ?? providers[0]
+    ?? {
+      id: providerId ?? DEFAULT_PROVIDER_ID,
+      type: 'jira' as const,
+      name: 'Default Jira'
+    };
+  const config = {
+    ...matchedProvider,
+    ...(overrides ?? {})
+  };
+  const baseUrl = normalizeOptionalString(config.jiraBaseUrl)?.replace(/\/+$/, '');
+  const userEmail = normalizeOptionalString(config.jiraUserEmail);
+  const inlineToken = normalizeOptionalString(config.jiraToken);
+  const tokenRef = normalizeOptionalString(config.jiraTokenRef);
+
+  return {
+    providerId: normalizeOptionalString(config.id) ?? matchedProvider.id,
+    providerName: normalizeOptionalString(config.name) ?? matchedProvider.name,
+    ...(baseUrl ? { baseUrl } : {}),
+    ...(userEmail ? { userEmail } : {}),
+    defaultIssueType: normalizeOptionalString(config.defaultIssueType) ?? DEFAULT_ISSUE_TYPE,
+    tokenSaved: Boolean(inlineToken || tokenRef)
   };
 }
 
@@ -280,13 +662,27 @@ function buildConfigSummary(config: JiraConfig): { ready: boolean; message: stri
   if (isConfigReady(config)) {
     return {
       ready: true,
-      message: `Connected through instance config at ${config.baseUrl}.`
+      message: `${config.providerName} is configured for ${config.baseUrl}.`
     };
   }
 
   return {
     ready: false,
-    message: 'Set jiraBaseUrl and jiraTokenRef in the plugin instance config. jiraUserEmail is optional and is only needed for Jira environments that require Basic auth instead of Bearer token auth.'
+    message: `Set the Jira base URL and token for ${config.providerName}. jiraUserEmail is optional and is only needed for Jira environments that require Basic auth instead of Bearer token auth.`
+  };
+}
+
+function buildDisplayConfigSummary(config: JiraProviderDisplayConfig): { ready: boolean; message: string } {
+  if (config.baseUrl && config.tokenSaved) {
+    return {
+      ready: true,
+      message: `${config.providerName} is configured for ${config.baseUrl}.`
+    };
+  }
+
+  return {
+    ready: false,
+    message: `Set the Jira base URL and token for ${config.providerName}. jiraUserEmail is optional and is only needed for Jira environments that require Basic auth instead of Bearer token auth.`
   };
 }
 
@@ -394,6 +790,44 @@ function buildJiraIssueUrl(config: JiraConfig, issueKey: string): string {
   return `${config.baseUrl}/browse/${issueKey}`;
 }
 
+function escapeJqlValue(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function buildJiraSearchJql(mapping: JiraMapping, filters?: JiraTaskFilters): string {
+  const clauses: string[] = [`project = ${mapping.jiraProjectKey}`];
+  if (filters?.onlyActive) {
+    clauses.push('statusCategory != Done');
+  }
+  if (filters?.author) {
+    clauses.push(`reporter = "${escapeJqlValue(filters.author)}"`);
+  }
+  if (filters?.assignee) {
+    clauses.push(`assignee = "${escapeJqlValue(filters.assignee)}"`);
+  }
+  if (filters?.issueNumberGreaterThan !== undefined) {
+    clauses.push(`issuekey > ${mapping.jiraProjectKey}-${filters.issueNumberGreaterThan}`);
+  }
+  if (filters?.issueNumberLessThan !== undefined) {
+    clauses.push(`issuekey < ${mapping.jiraProjectKey}-${filters.issueNumberLessThan}`);
+  }
+
+  if (mapping.jiraJql?.trim()) {
+    return `${mapping.jiraJql.trim()} ORDER BY updated DESC`;
+  }
+
+  return `${clauses.join(' AND ')} ORDER BY updated DESC`;
+}
+
+function stripIssueTitlePrefix(title: string): string {
+  return title.replace(/^\[[A-Z][A-Z0-9]+-\d+\]\s*/i, '').trim();
+}
+
+function ensureIssueTitlePrefix(title: string, jiraIssueKey: string): string {
+  const cleanTitle = stripIssueTitlePrefix(title);
+  return `[${jiraIssueKey}] ${cleanTitle || jiraIssueKey}`;
+}
+
 function normalizeJiraIssue(value: unknown, config: JiraConfig): JiraIssueRecord | null {
   if (!value || typeof value !== 'object') {
     return null;
@@ -407,6 +841,9 @@ function normalizeJiraIssue(value: unknown, config: JiraConfig): JiraIssueRecord
     : {};
   const issueType = fields.issuetype && typeof fields.issuetype === 'object'
     ? fields.issuetype as Record<string, unknown>
+    : {};
+  const assignee = fields.assignee && typeof fields.assignee === 'object'
+    ? fields.assignee as Record<string, unknown>
     : {};
   const commentsValue = fields.comment && typeof fields.comment === 'object'
     ? fields.comment as Record<string, unknown>
@@ -429,6 +866,7 @@ function normalizeJiraIssue(value: unknown, config: JiraConfig): JiraIssueRecord
     key,
     summary,
     description: adfToMarkdown(fields.description),
+    ...(normalizeOptionalString(assignee.displayName) ? { assigneeDisplayName: normalizeOptionalString(assignee.displayName) } : {}),
     statusName: normalizeOptionalString(status.name) ?? 'Unknown',
     statusCategory: normalizeOptionalString(statusCategory.name) ?? 'Unknown',
     updatedAt: normalizeOptionalString(fields.updated) ?? new Date().toISOString(),
@@ -466,13 +904,14 @@ async function searchJiraIssues(
   mapping: JiraMapping,
   options?: {
     issueKey?: string;
+    filters?: JiraTaskFilters;
   }
 ): Promise<JiraIssueRecord[]> {
   if (options?.issueKey) {
     const response = await jiraRequest<Record<string, unknown>>(
       ctx,
       config,
-      `/rest/api/2/issue/${encodeURIComponent(options.issueKey)}?fields=summary,description,status,comment,updated,created,issuetype`
+      `/rest/api/2/issue/${encodeURIComponent(options.issueKey)}?fields=summary,description,status,comment,updated,created,issuetype,assignee`
     );
     const issue = normalizeJiraIssue(response, config);
     return issue ? [issue] : [];
@@ -485,9 +924,9 @@ async function searchJiraIssues(
     {
       method: 'POST',
       body: JSON.stringify({
-        jql: mapping.jiraJql?.trim() || `project = ${mapping.jiraProjectKey} ORDER BY updated DESC`,
+        jql: buildJiraSearchJql(mapping, options?.filters),
         maxResults: 50,
-        fields: ['summary', 'description', 'status', 'comment', 'updated', 'created', 'issuetype']
+        fields: ['summary', 'description', 'status', 'comment', 'updated', 'created', 'issuetype', 'assignee']
       })
     }
   );
@@ -512,7 +951,7 @@ async function createJiraIssue(
       body: JSON.stringify({
         fields: {
           project: { key: mapping.jiraProjectKey },
-          summary: issue.title,
+          summary: stripIssueTitlePrefix(issue.title),
           description: plainTextToAdf(stripIssueMarker(issue.description ?? '')),
           issuetype: { name: config.defaultIssueType }
         }
@@ -546,7 +985,7 @@ async function updateJiraIssue(
       method: 'PUT',
       body: JSON.stringify({
         fields: {
-          summary: issue.title,
+          summary: stripIssueTitlePrefix(issue.title),
           description: plainTextToAdf(stripIssueMarker(issue.description ?? ''))
         }
       })
@@ -632,6 +1071,27 @@ async function syncJiraStatusFromPaperclip(
   return true;
 }
 
+async function transitionJiraIssue(
+  ctx: PluginSetupContext,
+  config: JiraConfig,
+  jiraIssueKey: string,
+  transitionId: string
+): Promise<void> {
+  await jiraRequest(
+    ctx,
+    config,
+    `/rest/api/2/issue/${encodeURIComponent(jiraIssueKey)}/transitions`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        transition: {
+          id: transitionId
+        }
+      })
+    }
+  );
+}
+
 async function addJiraComment(
   ctx: PluginSetupContext,
   config: JiraConfig,
@@ -657,6 +1117,26 @@ async function addJiraComment(
   return { id };
 }
 
+async function testJiraConnection(
+  ctx: PluginSetupContext,
+  config: JiraConfig
+): Promise<{ status: 'success' | 'error'; message: string }> {
+  try {
+    await jiraRequest(ctx, config, '/rest/api/2/myself');
+    return {
+      status: 'success',
+      message: config.baseUrl
+        ? `Connected to Jira at ${config.baseUrl}.`
+        : 'Connected to Jira.'
+    };
+  } catch (error) {
+    return {
+      status: 'error',
+      message: error instanceof Error ? error.message : 'Jira connection test failed.'
+    };
+  }
+}
+
 function buildIssueMarker(jiraIssueKey: string): string {
   return `${HIDDEN_ISSUE_MARKER_PREFIX}${jiraIssueKey}${HIDDEN_ISSUE_MARKER_SUFFIX}`;
 }
@@ -671,6 +1151,16 @@ function ensureIssueMarker(description: string, jiraIssueKey: string): string {
   return cleanDescription ? `${cleanDescription}\n\n${marker}` : marker;
 }
 
+function hasIssueMarker(description: string | null | undefined, jiraIssueKey?: string): boolean {
+  if (!description) {
+    return false;
+  }
+
+  return jiraIssueKey
+    ? description.includes(buildIssueMarker(jiraIssueKey))
+    : /<!-- paperclip-jira-plugin-upstream: [^>]+ -->/.test(description);
+}
+
 function hashCommentBody(body: string): string {
   return createHash('sha1').update(body).digest('hex');
 }
@@ -678,6 +1168,28 @@ function hashCommentBody(body: string): string {
 function buildImportedIssueDescription(jiraIssue: JiraIssueRecord): string {
   const body = jiraIssue.description.trim();
   return ensureIssueMarker(body || `_Imported from Jira ${jiraIssue.key}._`, jiraIssue.key);
+}
+
+function matchesImportedIssueSnapshot(issue: Issue, link: JiraIssueLinkData): boolean {
+  if (link.importedTitleHash && link.importedDescriptionHash) {
+    const currentTitleHash = hashCommentBody(issue.title);
+    const currentDescriptionHash = hashCommentBody(issue.description ?? '');
+    return currentTitleHash === link.importedTitleHash && currentDescriptionHash === link.importedDescriptionHash;
+  }
+
+  const prefixedTitle = issue.title.trim().startsWith(`[${link.jiraIssueKey}]`);
+  const descriptionHasMarker = hasIssueMarker(issue.description ?? '', link.jiraIssueKey);
+  return prefixedTitle && descriptionHasMarker;
+}
+
+function shouldPresentIssueLink(issue: Issue, link: JiraIssueLinkData | null): link is JiraIssueLinkData {
+  if (!link) {
+    return false;
+  }
+
+  const hasTitlePrefix = issue.title.trim().startsWith(`[${link.jiraIssueKey}]`);
+  const descriptionHasMarker = hasIssueMarker(issue.description ?? '', link.jiraIssueKey);
+  return hasTitlePrefix || descriptionHasMarker;
 }
 
 async function findLinkedIssueEntity(
@@ -822,7 +1334,15 @@ async function resolveMappingForIssue(
     return null;
   }
 
-  return getMappingsForCompany(settings, companyId).find((mapping) => mapping.paperclipProjectId === issue.projectId) ?? null;
+  const issueProject = await findProjectById(ctx, companyId, issue.projectId);
+  return getMappingsForCompany(settings, companyId).find((mapping) => mappingMatchesProject(mapping, issueProject)) ?? null;
+}
+
+async function getConfigForMapping(
+  ctx: PluginSetupContext,
+  mapping: JiraMapping
+): Promise<JiraConfig> {
+  return await getResolvedConfig(ctx, await getMappingProviderId(ctx, mapping));
 }
 
 async function importOrUpdateIssueFromJira(
@@ -833,39 +1353,47 @@ async function importOrUpdateIssueFromJira(
 ): Promise<'imported' | 'updated' | 'skipped'> {
   const existingLink = await findLinkedIssueEntityByKey(ctx, jiraIssue.key);
   const now = new Date().toISOString();
+  const providerId = await getMappingProviderId(ctx, mapping);
+  const importedTitle = ensureIssueTitlePrefix(jiraIssue.summary, jiraIssue.key);
+  const importedDescription = buildImportedIssueDescription(jiraIssue);
   if (!existingLink) {
-    if (!mapping.paperclipProjectId) {
+    const resolvedProject = await resolvePaperclipProjectForMapping(ctx, companyId, mapping);
+    if (!resolvedProject) {
       return 'skipped';
     }
 
     const createdIssue = await ctx.issues.create({
       companyId,
-      projectId: mapping.paperclipProjectId,
-      title: jiraIssue.summary,
-      description: buildImportedIssueDescription(jiraIssue),
+      projectId: resolvedProject.id,
+      title: importedTitle,
+      description: importedDescription,
       priority: 'medium'
     });
     await ctx.issues.update(
       createdIssue.id,
       {
-        description: buildImportedIssueDescription(jiraIssue)
+        description: importedDescription
       },
       companyId
     );
     await upsertIssueLinkEntity(ctx, createdIssue.id, {
       issueId: createdIssue.id,
       companyId,
-      projectId: mapping.paperclipProjectId,
+      projectId: resolvedProject.id,
+      ...(providerId ? { providerId } : {}),
       jiraIssueId: jiraIssue.id,
       jiraIssueKey: jiraIssue.key,
       jiraProjectKey: mapping.jiraProjectKey,
       jiraUrl: jiraIssue.url,
+      ...(jiraIssue.assigneeDisplayName ? { jiraAssigneeDisplayName: jiraIssue.assigneeDisplayName } : {}),
       jiraStatusName: jiraIssue.statusName,
       jiraStatusCategory: jiraIssue.statusCategory,
       linkedCommentCount: jiraIssue.comments.length,
       lastSyncedAt: now,
       lastPulledAt: now,
-      source: 'jira'
+      source: 'jira',
+      importedTitleHash: hashCommentBody(importedTitle),
+      importedDescriptionHash: hashCommentBody(importedDescription)
     });
     await importJiraComments(ctx, companyId, createdIssue.id, jiraIssue);
     return 'imported';
@@ -879,22 +1407,27 @@ async function importOrUpdateIssueFromJira(
   await ctx.issues.update(
     existingIssue.id,
     {
-      title: jiraIssue.summary,
-      description: buildImportedIssueDescription(jiraIssue)
-    },
+      title: importedTitle,
+      description: importedDescription,
+      hiddenAt: null
+    } as Record<string, unknown>,
     companyId
   );
   await upsertIssueLinkEntity(ctx, existingIssue.id, {
     ...existingLink,
+    ...(providerId ? { providerId } : {}),
     jiraIssueId: jiraIssue.id,
     jiraIssueKey: jiraIssue.key,
     jiraProjectKey: mapping.jiraProjectKey,
     jiraUrl: jiraIssue.url,
+    ...(jiraIssue.assigneeDisplayName ? { jiraAssigneeDisplayName: jiraIssue.assigneeDisplayName } : {}),
     jiraStatusName: jiraIssue.statusName,
     jiraStatusCategory: jiraIssue.statusCategory,
     linkedCommentCount: jiraIssue.comments.length,
     lastSyncedAt: now,
-    lastPulledAt: now
+    lastPulledAt: now,
+    importedTitleHash: hashCommentBody(importedTitle),
+    importedDescriptionHash: hashCommentBody(importedDescription)
   });
   await importJiraComments(ctx, companyId, existingIssue.id, jiraIssue);
   return 'updated';
@@ -908,23 +1441,14 @@ async function syncMappings(
     projectId?: string;
     issueId?: string;
     issueLinkKey?: string;
+    filters?: JiraTaskFilters;
     trigger?: SyncRunState['lastRunTrigger'];
   }
 ): Promise<SyncRunState> {
-  const config = await getResolvedConfig(ctx);
-  const configSummary = buildConfigSummary(config);
-  if (!configSummary.ready) {
-    return await saveSyncState(ctx, settings, companyId, {
-      status: 'error',
-      message: configSummary.message,
-      checkedAt: new Date().toISOString(),
-      lastRunTrigger: options?.trigger ?? 'manual'
-    }).then((next) => getSyncStateForCompany(next, companyId));
-  }
-
   const allMappings = getMappingsForCompany(settings, companyId);
+  const scopedProject = options?.projectId ? await findProjectById(ctx, companyId, options.projectId) : null;
   const mappings = options?.projectId
-    ? allMappings.filter((mapping) => mapping.paperclipProjectId === options.projectId)
+    ? allMappings.filter((mapping) => mappingMatchesProject(mapping, scopedProject))
     : allMappings;
   if (mappings.length === 0) {
     return await saveSyncState(ctx, settings, companyId, {
@@ -939,6 +1463,7 @@ async function syncMappings(
     status: 'running',
     message: 'Jira sync is running.',
     checkedAt: new Date().toISOString(),
+    processedCount: 0,
     lastRunTrigger: options?.trigger ?? 'manual'
   });
 
@@ -948,11 +1473,38 @@ async function syncMappings(
   let failedCount = 0;
 
   try {
+    const issueBatches: Array<{ mapping: JiraMapping; issues: JiraIssueRecord[] }> = [];
     for (const mapping of mappings) {
+      const config = await getConfigForMapping(ctx, mapping);
+      const configSummary = buildConfigSummary(config);
+      if (!configSummary.ready) {
+        throw new Error(`Provider for Jira project ${mapping.jiraProjectKey} is not ready. ${configSummary.message}`);
+      }
+
+      const mappingFilters = options?.filters ?? mapping.filters ?? getFiltersForCompany(settings, companyId);
       const issues = options?.issueLinkKey
         ? await searchJiraIssues(ctx, config, mapping, { issueKey: options.issueLinkKey })
-        : await searchJiraIssues(ctx, config, mapping);
-      for (const jiraIssue of issues) {
+        : await searchJiraIssues(ctx, config, mapping, { filters: mappingFilters });
+      issueBatches.push({ mapping, issues });
+    }
+
+    const totalCount = issueBatches.reduce((sum, batch) => sum + batch.issues.length, 0);
+    await saveSyncState(ctx, settings, companyId, {
+      status: 'running',
+      message: totalCount > 0 ? `Jira sync is running. 0 of ${totalCount} issues processed.` : 'No Jira issues matched the current filters.',
+      checkedAt: new Date().toISOString(),
+      processedCount: 0,
+      totalCount,
+      importedCount,
+      updatedCount,
+      skippedCount,
+      failedCount,
+      lastRunTrigger: options?.trigger ?? 'manual'
+    });
+
+    let processedCount = 0;
+    for (const batch of issueBatches) {
+      for (const jiraIssue of batch.issues) {
         if (options?.issueId) {
           const currentLink = await findLinkedIssueEntity(ctx, options.issueId);
           if (currentLink?.jiraIssueKey && currentLink.jiraIssueKey !== jiraIssue.key) {
@@ -960,7 +1512,7 @@ async function syncMappings(
           }
         }
 
-        const result = await importOrUpdateIssueFromJira(ctx, companyId, mapping, jiraIssue);
+        const result = await importOrUpdateIssueFromJira(ctx, companyId, batch.mapping, jiraIssue);
         if (result === 'imported') {
           importedCount += 1;
         } else if (result === 'updated') {
@@ -968,12 +1520,29 @@ async function syncMappings(
         } else {
           skippedCount += 1;
         }
+        processedCount += 1;
+        await saveSyncState(ctx, settings, companyId, {
+          status: 'running',
+          message: totalCount > 0
+            ? `Jira sync is running. ${processedCount} of ${totalCount} issues processed.`
+            : 'Jira sync is running.',
+          checkedAt: new Date().toISOString(),
+          processedCount,
+          totalCount,
+          importedCount,
+          updatedCount,
+          skippedCount,
+          failedCount,
+          lastRunTrigger: options?.trigger ?? 'manual'
+        });
       }
     }
 
     const nextSettings = await saveSyncState(ctx, settings, companyId, {
       status: 'success',
       message: `Jira sync finished. Imported ${importedCount}, updated ${updatedCount}, skipped ${skippedCount}.`,
+      processedCount: importedCount + updatedCount + skippedCount,
+      totalCount,
       importedCount,
       updatedCount,
       skippedCount,
@@ -987,6 +1556,7 @@ async function syncMappings(
     const nextSettings = await saveSyncState(ctx, settings, companyId, {
       status: 'error',
       message: error instanceof Error ? error.message : 'Jira sync failed.',
+      processedCount: importedCount + updatedCount + skippedCount,
       importedCount,
       updatedCount,
       skippedCount,
@@ -1003,21 +1573,109 @@ async function buildSettingsRegistrationData(
   companyId?: string
 ): Promise<Record<string, unknown>> {
   const settings = normalizeSettings(await ctx.state.get(SETTINGS_SCOPE));
-  const config = await getResolvedConfig(ctx);
-  const configSummary = buildConfigSummary(config);
   const projects = companyId ? await ctx.projects.list({ companyId }) : [];
+  const providers = await getAvailableProviders(ctx);
+  const providerSummaries = await Promise.all(providers.map(async (provider) => {
+    const config = await getProviderDisplayConfig(ctx, provider.id);
+    const configSummary = buildDisplayConfigSummary(config);
+    return {
+      providerId: provider.id,
+      providerKey: provider.type,
+      displayName: provider.name,
+      status: configSummary.ready ? 'configured' : 'needs_config',
+      configSummary: configSummary.message,
+      supportsConnectionTest: true,
+      defaultIssueType: config.defaultIssueType,
+      tokenSaved: config.tokenSaved
+    };
+  }));
+  const selectedProviderId = providerSummaries[0]?.providerId;
+  const selectedProviderConfig = selectedProviderId ? await getProviderDisplayConfig(ctx, selectedProviderId) : null;
+  const selectedProviderSummary = selectedProviderConfig ? buildDisplayConfigSummary(selectedProviderConfig) : null;
 
   return {
     mappings: getMappingsForCompany(settings, companyId),
+    filters: getFiltersForCompany(settings, companyId),
+    providers: providerSummaries,
+    selectedProviderId,
+    selectedProviderKey: 'jira',
+    connectionTest: getConnectionTestStateForCompany(settings, companyId),
     syncState: getSyncStateForCompany(settings, companyId),
     scheduleFrequencyMinutes: getScheduleFrequencyMinutes(settings, companyId),
     availableProjects: projects.map((project) => ({
       id: project.id,
       name: project.name
     })),
-    configReady: configSummary.ready,
-    configMessage: configSummary.message,
+    configReady: selectedProviderSummary?.ready ?? false,
+    configMessage: selectedProviderSummary?.message ?? 'Create a provider to start syncing.',
     updatedAt: settings.updatedAt
+  };
+}
+
+async function buildSyncProvidersData(
+  ctx: PluginSetupContext,
+  companyId?: string
+): Promise<Record<string, unknown>> {
+  const settings = normalizeSettings(await ctx.state.get(SETTINGS_SCOPE));
+  const providers = await getAvailableProviders(ctx);
+  const connectionTest = getConnectionTestStateForCompany(settings, companyId);
+
+  return {
+    providers: await Promise.all(providers.map(async (provider) => {
+      const config = await getProviderDisplayConfig(ctx, provider.id);
+      const configSummary = buildDisplayConfigSummary(config);
+      const providerConnectionTest =
+        connectionTest.providerKey === 'jira' && connectionTest.message && connectionTest.status !== 'idle'
+          ? connectionTest
+          : { status: 'idle' } as ConnectionTestState;
+      return {
+        providerId: provider.id,
+        providerKey: provider.type,
+        displayName: provider.name,
+        status:
+          providerConnectionTest.status === 'success'
+            ? 'connected'
+            : configSummary.ready
+              ? 'configured'
+              : 'needs_config',
+        configSummary:
+          providerConnectionTest.status === 'success' || providerConnectionTest.status === 'error'
+            ? providerConnectionTest.message
+            : configSummary.message,
+        supportsConnectionTest: true
+      };
+    }))
+  };
+}
+
+async function buildSyncPopupState(
+  ctx: PluginSetupContext,
+  companyId?: string,
+  providerId?: string
+): Promise<Record<string, unknown>> {
+  const settingsData = await buildSettingsRegistrationData(ctx, companyId);
+  const selectedProviderId =
+    normalizeOptionalString(providerId)
+    ?? normalizeOptionalString(settingsData.selectedProviderId)
+    ?? undefined;
+  const config = selectedProviderId ? await getProviderDisplayConfig(ctx, selectedProviderId) : null;
+
+  return {
+    ...settingsData,
+    selectedProviderId: selectedProviderId ?? null,
+    selectedProviderKey: 'jira',
+    providerConfig: {
+      providerKey: 'jira',
+      providerId: selectedProviderId ?? null,
+      providerName: config?.providerName ?? '',
+      jiraBaseUrl: config?.baseUrl ?? '',
+      jiraUserEmail: config?.userEmail ?? '',
+      defaultIssueType: config?.defaultIssueType ?? DEFAULT_ISSUE_TYPE,
+      tokenSaved: Boolean(config?.tokenSaved)
+    },
+    filters: settingsData.filters ?? {},
+    syncProgress: settingsData.syncState ?? { status: 'idle' },
+    connectionTest: settingsData.connectionTest ?? { status: 'idle' }
   };
 }
 
@@ -1033,13 +1691,30 @@ async function buildIssueJiraDetails(
   }
 
   const mapping = await resolveMappingForIssue(ctx, settings, companyId, issueId);
-  const link = await findLinkedIssueEntity(ctx, issueId);
+  const rawLink = await findLinkedIssueEntity(ctx, issueId);
+  const link = shouldPresentIssueLink(issue, rawLink) ? rawLink : null;
+  let availableTransitions: Array<{ id: string; name: string }> = [];
+  if (link) {
+    try {
+      const config = await getResolvedConfig(ctx, link.providerId ?? mapping?.providerId);
+      availableTransitions = await listJiraTransitions(ctx, config, link.jiraIssueKey);
+    } catch {
+      availableTransitions = [];
+    }
+  }
 
   return {
     visible: Boolean(link || mapping),
+    isSynced: Boolean(link),
     linked: Boolean(link),
+    providerKey: 'jira',
     issueId,
     localStatus: issue.status,
+    syncTone: link ? 'synced' : 'local',
+    titlePrefix: link ? `[${link.jiraIssueKey}]` : null,
+    upstreamIssueKey: link?.jiraIssueKey ?? null,
+    openInProviderUrl: link?.jiraUrl ?? null,
+    lastSyncedAt: link?.lastSyncedAt ?? null,
     ...(issue.projectId ? { projectId: issue.projectId } : {}),
     ...(mapping
       ? {
@@ -1054,13 +1729,19 @@ async function buildIssueJiraDetails(
           upstream: {
             issueKey: link.jiraIssueKey,
             jiraUrl: link.jiraUrl,
+            jiraAssigneeDisplayName: link.jiraAssigneeDisplayName,
             jiraStatusName: link.jiraStatusName,
             jiraStatusCategory: link.jiraStatusCategory,
             lastSyncedAt: link.lastSyncedAt,
             lastPulledAt: link.lastPulledAt,
             lastPushedAt: link.lastPushedAt,
             source: link.source
-          }
+          },
+          upstreamStatus: {
+            name: link.jiraStatusName,
+            category: link.jiraStatusCategory
+          },
+          upstreamTransitions: availableTransitions
         }
       : {})
   };
@@ -1078,13 +1759,29 @@ async function buildCommentAnnotationData(
   }
 
   const commentLink = await findCommentLinkEntity(ctx, issueId, commentId);
+  const origin = !commentLink
+    ? 'paperclip'
+    : commentLink.direction === 'pull'
+      ? 'provider_pull'
+      : 'provider_push';
   return {
     visible: true,
     linked: Boolean(commentLink),
     direction: commentLink?.direction ?? null,
+    origin,
+    providerKey: 'jira',
+    isEditable: true,
+    uploadAvailable: !commentLink,
     jiraIssueKey: link.jiraIssueKey,
     jiraUrl: link.jiraUrl,
-    lastSyncedAt: commentLink?.lastSyncedAt ?? null
+    upstreamCommentId: commentLink?.jiraCommentId ?? null,
+    lastSyncedAt: commentLink?.lastSyncedAt ?? null,
+    syncMessage:
+      origin === 'provider_pull'
+        ? `Fetched from Jira issue ${link.jiraIssueKey}.`
+        : origin === 'provider_push'
+          ? `Uploaded to Jira issue ${link.jiraIssueKey}.`
+          : `Local Paperclip comment on Jira issue ${link.jiraIssueKey}.`
   };
 }
 
@@ -1110,7 +1807,7 @@ async function pushIssueToJira(
     throw new Error('This Paperclip issue is not in a mapped project yet.');
   }
 
-  const config = await getResolvedConfig(ctx);
+  const config = await getConfigForMapping(ctx, mapping);
   if (!isConfigReady(config)) {
     throw new Error(buildConfigSummary(config).message);
   }
@@ -1139,6 +1836,7 @@ async function pushIssueToJira(
   await ctx.issues.update(
     issueId,
     {
+      title: ensureIssueTitlePrefix(issue.title, jiraIssue.key),
       description: ensureIssueMarker(issue.description ?? '', jiraIssue.key)
     },
     companyId
@@ -1147,10 +1845,12 @@ async function pushIssueToJira(
     issueId,
     companyId,
     projectId: issue.projectId ?? mapping.paperclipProjectId,
+    providerId: config.providerId,
     jiraIssueId: jiraIssue.id,
     jiraIssueKey: jiraIssue.key,
     jiraProjectKey: mapping.jiraProjectKey,
     jiraUrl: jiraIssue.url,
+    ...(jiraIssue.assigneeDisplayName ? { jiraAssigneeDisplayName: jiraIssue.assigneeDisplayName } : {}),
     jiraStatusName: jiraIssue.statusName,
     jiraStatusCategory: jiraIssue.statusCategory,
     linkedCommentCount: jiraIssue.comments.length,
@@ -1212,7 +1912,13 @@ async function pushCommentToJira(
     };
   }
 
-  const config = await getResolvedConfig(ctx);
+  const settings = normalizeSettings(await ctx.state.get(SETTINGS_SCOPE));
+  const mapping = await resolveMappingForIssue(ctx, settings, companyId, issueId);
+  if (!mapping) {
+    throw new Error('This Paperclip issue is not in a mapped project yet.');
+  }
+
+  const config = await getConfigForMapping(ctx, mapping);
   if (!isConfigReady(config)) {
     throw new Error(buildConfigSummary(config).message);
   }
@@ -1236,12 +1942,131 @@ async function pushCommentToJira(
 
   return {
     ok: true,
+    upstreamCommentId: commentCreateResult.id,
     message: `Synced comment to Jira issue ${issueLink.jiraIssueKey}.`
   };
 }
 
+async function setUpstreamIssueStatus(
+  ctx: PluginSetupContext,
+  companyId: string,
+  issueId: string,
+  transitionId: string
+): Promise<Record<string, unknown>> {
+  const settings = normalizeSettings(await ctx.state.get(SETTINGS_SCOPE));
+  const link = await findLinkedIssueEntity(ctx, issueId);
+  if (!link) {
+    throw new Error('This Paperclip issue is not linked to Jira yet.');
+  }
+
+  const mapping = await resolveMappingForIssue(ctx, settings, companyId, issueId);
+  const config = await getResolvedConfig(ctx, link.providerId ?? mapping?.providerId);
+  if (!isConfigReady(config)) {
+    throw new Error(buildConfigSummary(config).message);
+  }
+
+  const transitions = await listJiraTransitions(ctx, config, link.jiraIssueKey);
+  const selectedTransition = transitions.find((transition) => transition.id === transitionId);
+  if (!selectedTransition) {
+    throw new Error('That Jira status transition is not available right now.');
+  }
+
+  await transitionJiraIssue(ctx, config, link.jiraIssueKey, transitionId);
+  const [reloadedIssue] = await searchJiraIssues(ctx, config, {
+    id: mapping?.id ?? 'reload',
+    companyId,
+    providerId: link.providerId ?? mapping?.providerId,
+    jiraProjectKey: link.jiraProjectKey,
+    jiraJql: mapping?.jiraJql,
+    paperclipProjectId: mapping?.paperclipProjectId,
+    paperclipProjectName: mapping?.paperclipProjectName ?? '',
+    filters: mapping?.filters
+  }, { issueKey: link.jiraIssueKey });
+
+  if (!reloadedIssue) {
+    throw new Error(`Jira issue ${link.jiraIssueKey} could not be reloaded after the status change.`);
+  }
+
+  await upsertIssueLinkEntity(ctx, issueId, {
+    ...link,
+    ...(reloadedIssue.assigneeDisplayName ? { jiraAssigneeDisplayName: reloadedIssue.assigneeDisplayName } : {}),
+    jiraStatusName: reloadedIssue.statusName,
+    jiraStatusCategory: reloadedIssue.statusCategory,
+    lastSyncedAt: new Date().toISOString(),
+    lastPushedAt: new Date().toISOString()
+  });
+
+  return {
+    ok: true,
+    message: `Updated Jira status to ${reloadedIssue.statusName}.`
+  };
+}
+
+async function findCleanupCandidates(
+  ctx: PluginSetupContext,
+  companyId: string
+): Promise<Array<{ issueId: string; title: string; jiraIssueKey: string; status: string }>> {
+  const issueLinks = await ctx.entities.list({
+    entityType: ISSUE_LINK_ENTITY_TYPE,
+    limit: 500
+  });
+  const scopedLinks = issueLinks
+    .map((entry) => entry.data as unknown as JiraIssueLinkData)
+    .filter((entry) => entry.companyId === companyId);
+  const candidates: Array<{ issueId: string; title: string; jiraIssueKey: string; status: string }> = [];
+
+  for (const link of scopedLinks) {
+    if (link.source !== 'jira' || link.lastPushedAt) {
+      continue;
+    }
+
+    const issue = await ctx.issues.get(link.issueId, companyId);
+    if (!issue) {
+      continue;
+    }
+    if (issue.hiddenAt) {
+      continue;
+    }
+
+    const commentRegistry = await getCommentLinkRegistry(ctx, issue.id);
+    const hasPushedComment = Object.values(commentRegistry).some((entry) => entry.direction === 'push');
+    if (hasPushedComment) {
+      continue;
+    }
+
+    if (!matchesImportedIssueSnapshot(issue, link)) {
+      continue;
+    }
+
+    candidates.push({
+      issueId: issue.id,
+      title: issue.title,
+      jiraIssueKey: link.jiraIssueKey,
+      status: issue.status
+    });
+  }
+
+  return candidates;
+}
+
 const plugin = definePlugin({
   async setup(ctx) {
+    ctx.launchers.register(GLOBAL_SYNC_LAUNCHER);
+    ctx.launchers.register(ENTITY_SYNC_LAUNCHER);
+
+    ctx.data.register('sync.providers', async (input) => {
+      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const companyId = normalizeCompanyId(record.companyId);
+      return await buildSyncProvidersData(ctx, companyId);
+    });
+
+    ctx.data.register('sync.popupState', async (input) => {
+      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const companyId = normalizeCompanyId(record.companyId);
+      const providerId = normalizeOptionalString(record.providerId);
+      return await buildSyncPopupState(ctx, companyId, providerId);
+    });
+
     ctx.data.register('settings.registration', async (input) => {
       const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
       const companyId = normalizeCompanyId(record.companyId);
@@ -1280,6 +2105,17 @@ const plugin = definePlugin({
       return await buildIssueJiraDetails(ctx, companyId, issueId);
     });
 
+    ctx.data.register('issue.syncPresentation', async (input) => {
+      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const companyId = normalizeCompanyId(record.companyId);
+      const issueId = normalizeOptionalString(record.issueId);
+      if (!companyId || !issueId) {
+        return { visible: false, isSynced: false };
+      }
+
+      return await buildIssueJiraDetails(ctx, companyId, issueId);
+    });
+
     ctx.data.register('comment.annotation', async (input) => {
       const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
       const companyId = normalizeCompanyId(record.companyId);
@@ -1287,6 +2123,18 @@ const plugin = definePlugin({
       const commentId = normalizeOptionalString(record.commentId);
       if (!companyId || !issueId || !commentId) {
         return { visible: false };
+      }
+
+      return await buildCommentAnnotationData(ctx, companyId, issueId, commentId);
+    });
+
+    ctx.data.register('comment.syncPresentation', async (input) => {
+      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const companyId = normalizeCompanyId(record.companyId);
+      const issueId = normalizeOptionalString(record.issueId);
+      const commentId = normalizeOptionalString(record.commentId);
+      if (!companyId || !issueId || !commentId) {
+        return { visible: false, origin: 'paperclip', uploadAvailable: false };
       }
 
       return await buildCommentAnnotationData(ctx, companyId, issueId, commentId);
@@ -1324,19 +2172,136 @@ const plugin = definePlugin({
       return await buildSettingsRegistrationData(ctx, companyId);
     });
 
+    ctx.actions.register('sync.provider.saveConfig', async (input) => {
+      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const companyId = normalizeCompanyId(record.companyId);
+      const providerKey = normalizeOptionalString(record.providerKey);
+      if (!companyId) {
+        throw new Error('A company id is required to save provider sync settings.');
+      }
+      if (providerKey && providerKey !== 'jira') {
+        throw new Error(`Unsupported provider: ${providerKey}`);
+      }
+
+      const previous = normalizeSettings(await ctx.state.get(SETTINGS_SCOPE));
+      const filters = normalizeTaskFilters(record.filters);
+      const next: JiraSyncSettings = {
+        ...previous,
+        filtersByCompanyId: {
+          ...(previous.filtersByCompanyId ?? {}),
+          [companyId]: filters
+        },
+        updatedAt: new Date().toISOString()
+      };
+      await saveSettings(ctx, next);
+      return await buildSyncPopupState(ctx, companyId, 'jira');
+    });
+
+    ctx.actions.register('sync.provider.testConnection', async (input) => {
+      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const companyId = normalizeCompanyId(record.companyId);
+      const providerKey = normalizeOptionalString(record.providerKey);
+      const providerId = normalizeOptionalString(record.providerId);
+      if (!companyId) {
+        throw new Error('A company id is required to test the Jira connection.');
+      }
+      if (providerKey && providerKey !== 'jira') {
+        throw new Error(`Unsupported provider: ${providerKey}`);
+      }
+
+      const settings = normalizeSettings(await ctx.state.get(SETTINGS_SCOPE));
+      const testingSettings = await saveConnectionTestState(ctx, settings, companyId, {
+        status: 'testing',
+        message: 'Testing Jira connection…',
+        checkedAt: new Date().toISOString(),
+        providerKey: 'jira'
+      });
+      const configOverrides =
+        record.config && typeof record.config === 'object'
+          ? record.config as JiraProviderConfigRecord
+          : undefined;
+      const config = await getResolvedConfig(ctx, providerId, configOverrides);
+      const result = await testJiraConnection(ctx, config);
+      await saveConnectionTestState(ctx, testingSettings, companyId, {
+        status: result.status,
+        message: result.message,
+        checkedAt: new Date().toISOString(),
+        providerKey: 'jira'
+      });
+      return result;
+    });
+
+    ctx.actions.register('sync.testConnection', async (input) => {
+      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const companyId = normalizeCompanyId(record.companyId);
+      const providerKey = normalizeOptionalString(record.providerKey);
+      const providerId = normalizeOptionalString(record.providerId);
+      if (!companyId) {
+        throw new Error('A company id is required to test the Jira connection.');
+      }
+      if (providerKey && providerKey !== 'jira') {
+        throw new Error(`Unsupported provider: ${providerKey}`);
+      }
+
+      const settings = normalizeSettings(await ctx.state.get(SETTINGS_SCOPE));
+      const testingSettings = await saveConnectionTestState(ctx, settings, companyId, {
+        status: 'testing',
+        message: 'Testing Jira connection…',
+        checkedAt: new Date().toISOString(),
+        providerKey: 'jira'
+      });
+      const configOverrides =
+        record.config && typeof record.config === 'object'
+          ? record.config as JiraProviderConfigRecord
+          : undefined;
+      const config = await getResolvedConfig(ctx, providerId, configOverrides);
+      const result = await testJiraConnection(ctx, config);
+      await saveConnectionTestState(ctx, testingSettings, companyId, {
+        status: result.status,
+        message: result.message,
+        checkedAt: new Date().toISOString(),
+        providerKey: 'jira'
+      });
+      return result;
+    });
+
     ctx.actions.register('sync.runNow', async (input) => {
       const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
       const companyId = normalizeCompanyId(record.companyId);
       if (!companyId) {
         throw new Error('A company id is required to run Jira sync.');
       }
+      const providerKey = normalizeOptionalString(record.providerKey);
+      if (providerKey && providerKey !== 'jira') {
+        throw new Error(`Unsupported provider: ${providerKey}`);
+      }
 
       const settings = normalizeSettings(await ctx.state.get(SETTINGS_SCOPE));
+      const overrideFilters = record.filters ? normalizeTaskFilters(record.filters) : undefined;
       return await syncMappings(ctx, settings, companyId, {
         ...(normalizeOptionalString(record.projectId) ? { projectId: normalizeOptionalString(record.projectId) } : {}),
         ...(normalizeOptionalString(record.issueId) ? { issueId: normalizeOptionalString(record.issueId) } : {}),
+        ...(overrideFilters ? { filters: overrideFilters } : {}),
         trigger: 'manual'
       });
+    });
+
+    ctx.actions.register('sync.findCleanupCandidates', async (input) => {
+      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const companyId = normalizeCompanyId(record.companyId);
+      if (!companyId) {
+        throw new Error('A company id is required to clean up imported issues.');
+      }
+
+      const candidates = await findCleanupCandidates(ctx, companyId);
+      return {
+        candidates,
+        count: candidates.length,
+        message:
+          candidates.length > 0
+            ? `Found ${candidates.length} untouched imported issue${candidates.length === 1 ? '' : 's'} to clean up.`
+            : 'No untouched imported issues need cleanup.'
+      };
     });
 
     ctx.actions.register('issue.pushToJira', async (input) => {
@@ -1361,7 +2326,31 @@ const plugin = definePlugin({
       return await pullIssueFromJira(ctx, companyId, issueId);
     });
 
+    ctx.actions.register('issue.setUpstreamStatus', async (input) => {
+      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const companyId = normalizeCompanyId(record.companyId);
+      const issueId = normalizeOptionalString(record.issueId);
+      const transitionId = normalizeOptionalString(record.transitionId);
+      if (!companyId || !issueId || !transitionId) {
+        throw new Error('companyId, issueId, and transitionId are required.');
+      }
+
+      return await setUpstreamIssueStatus(ctx, companyId, issueId, transitionId);
+    });
+
     ctx.actions.register('comment.pushToJira', async (input) => {
+      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const companyId = normalizeCompanyId(record.companyId);
+      const issueId = normalizeOptionalString(record.issueId);
+      const commentId = normalizeOptionalString(record.commentId);
+      if (!companyId || !issueId || !commentId) {
+        throw new Error('companyId, issueId, and commentId are required.');
+      }
+
+      return await pushCommentToJira(ctx, companyId, issueId, commentId);
+    });
+
+    ctx.actions.register('comment.uploadToProvider', async (input) => {
       const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
       const companyId = normalizeCompanyId(record.companyId);
       const issueId = normalizeOptionalString(record.issueId);

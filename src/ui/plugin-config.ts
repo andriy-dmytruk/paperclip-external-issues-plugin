@@ -1,147 +1,103 @@
-export type PluginConfigBoardTokenRefs = Record<string, string>;
-export type PluginConfigGitHubTokenRefs = Record<string, string>;
+import { useEffect, useState } from 'react';
 
-export interface GitHubSyncPluginConfig extends Record<string, unknown> {
-  githubTokenRefs?: PluginConfigGitHubTokenRefs;
-  paperclipBoardApiTokenRefs?: PluginConfigBoardTokenRefs;
-  paperclipApiBaseUrl?: string;
+const PLUGIN_ID = 'paperclip-jira-plugin';
+
+export const DEFAULT_JIRA_ISSUE_TYPE = 'Task';
+export const JIRA_ISSUE_TYPE_OPTIONS = ['Task', 'Bug', 'Story', 'Epic', 'Sub-task'] as const;
+
+export interface JiraProviderConfig {
+  id: string;
+  type: 'jira';
+  name: string;
+  jiraBaseUrl?: string;
+  jiraUserEmail?: string;
+  jiraToken?: string;
+  jiraTokenRef?: string;
+  defaultIssueType?: string;
 }
 
-function normalizeOptionalString(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+export interface JiraPluginConfig {
+  providers?: JiraProviderConfig[];
+  jiraBaseUrl?: string;
+  jiraUserEmail?: string;
+  jiraToken?: string;
+  jiraTokenRef?: string;
+  defaultIssueType?: string;
 }
 
-function normalizePaperclipApiBaseUrl(value: unknown): string | undefined {
-  const normalizedValue = normalizeOptionalString(value);
-  if (!normalizedValue) {
-    return undefined;
-  }
-
-  try {
-    return new URL(normalizedValue).origin;
-  } catch {
-    return undefined;
-  }
-}
-
-export function normalizePluginConfigBoardTokenRefs(value: unknown): PluginConfigBoardTokenRefs | undefined {
-  if (!value || typeof value !== 'object') {
-    return undefined;
-  }
-
-  const entries = Object.entries(value as Record<string, unknown>)
-    .map(([companyId, secretRef]) => {
-      const normalizedCompanyId = normalizeOptionalString(companyId);
-      const normalizedSecretRef = normalizeOptionalString(secretRef);
-      return normalizedCompanyId && normalizedSecretRef
-        ? [normalizedCompanyId, normalizedSecretRef] as const
-        : null;
-    })
-    .filter((entry): entry is readonly [string, string] => Boolean(entry));
-
-  if (entries.length === 0) {
-    return undefined;
-  }
-
-  return Object.fromEntries(entries);
-}
-
-export function normalizePluginConfigGitHubTokenRefs(value: unknown): PluginConfigGitHubTokenRefs | undefined {
-  if (!value || typeof value !== 'object') {
-    return undefined;
-  }
-
-  const entries = Object.entries(value as Record<string, unknown>)
-    .map(([companyId, secretRef]) => {
-      const normalizedCompanyId = normalizeOptionalString(companyId);
-      const normalizedSecretRef = normalizeOptionalString(secretRef);
-      return normalizedCompanyId && normalizedSecretRef
-        ? [normalizedCompanyId, normalizedSecretRef] as const
-        : null;
-    })
-    .filter((entry): entry is readonly [string, string] => Boolean(entry));
-
-  if (entries.length === 0) {
-    return undefined;
-  }
-
-  return Object.fromEntries(entries);
-}
-
-export function normalizePluginConfig(value: unknown): GitHubSyncPluginConfig {
-  if (!value || typeof value !== 'object') {
-    return {};
-  }
-
-  const record = { ...(value as Record<string, unknown>) };
-  const githubTokenRefs = normalizePluginConfigGitHubTokenRefs(record.githubTokenRefs);
-  const paperclipBoardApiTokenRefs = normalizePluginConfigBoardTokenRefs(record.paperclipBoardApiTokenRefs);
-  const paperclipApiBaseUrl = normalizePaperclipApiBaseUrl(record.paperclipApiBaseUrl);
-
-  if (githubTokenRefs) {
-    record.githubTokenRefs = githubTokenRefs;
-  } else {
-    delete record.githubTokenRefs;
-  }
-
-  if (paperclipBoardApiTokenRefs) {
-    record.paperclipBoardApiTokenRefs = paperclipBoardApiTokenRefs;
-  } else {
-    delete record.paperclipBoardApiTokenRefs;
-  }
-
-  if (paperclipApiBaseUrl) {
-    record.paperclipApiBaseUrl = paperclipApiBaseUrl;
-  } else {
-    delete record.paperclipApiBaseUrl;
-  }
-
-  return record as GitHubSyncPluginConfig;
-}
-
-export function mergePluginConfig(
-  currentValue: unknown,
-  patch: Partial<GitHubSyncPluginConfig>
-): GitHubSyncPluginConfig {
-  const current = normalizePluginConfig(currentValue);
-  const currentGitHubTokenRefs = normalizePluginConfigGitHubTokenRefs(current.githubTokenRefs);
-  const patchGitHubTokenRefs = normalizePluginConfigGitHubTokenRefs(patch.githubTokenRefs);
-  const currentBoardTokenRefs = normalizePluginConfigBoardTokenRefs(current.paperclipBoardApiTokenRefs);
-  const patchBoardTokenRefs = normalizePluginConfigBoardTokenRefs(patch.paperclipBoardApiTokenRefs);
-  const next = normalizePluginConfig({
-    ...current,
-    ...patch
+export function hostFetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+  return fetch(path, {
+    credentials: 'include',
+    headers: {
+      'content-type': 'application/json',
+      ...(init?.headers ?? {})
+    },
+    ...init
+  }).then(async (response) => {
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || `Request failed: ${response.status}`);
+    }
+    return await response.json() as T;
   });
+}
 
-  if ('githubTokenRefs' in patch) {
-    const mergedGitHubTokenRefs = {
-      ...(currentGitHubTokenRefs ?? {}),
-      ...(patchGitHubTokenRefs ?? {})
+export function usePluginConfig() {
+  const [configJson, setConfigJson] = useState<JiraPluginConfig>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    hostFetchJson<{ configJson?: JiraPluginConfig | null } | null>(`/api/plugins/${PLUGIN_ID}/config`)
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        setConfigJson(result?.configJson ?? {});
+        setError(null);
+      })
+      .catch((nextError) => {
+        if (cancelled) {
+          return;
+        }
+        setError(nextError instanceof Error ? nextError.message : String(nextError));
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
     };
+  }, []);
 
-    if (Object.keys(mergedGitHubTokenRefs).length > 0) {
-      next.githubTokenRefs = mergedGitHubTokenRefs;
-    } else {
-      delete next.githubTokenRefs;
+  async function save(nextConfig: JiraPluginConfig) {
+    setSaving(true);
+    try {
+      await hostFetchJson(`/api/plugins/${PLUGIN_ID}/config`, {
+        method: 'POST',
+        body: JSON.stringify({ configJson: nextConfig })
+      });
+      setConfigJson(nextConfig);
+      setError(null);
+    } catch (nextError) {
+      setError(nextError instanceof Error ? nextError.message : String(nextError));
+      throw nextError;
+    } finally {
+      setSaving(false);
     }
-  } else if (currentGitHubTokenRefs) {
-    next.githubTokenRefs = currentGitHubTokenRefs;
   }
 
-  if ('paperclipBoardApiTokenRefs' in patch) {
-    const mergedBoardTokenRefs = {
-      ...(currentBoardTokenRefs ?? {}),
-      ...(patchBoardTokenRefs ?? {})
-    };
-
-    if (Object.keys(mergedBoardTokenRefs).length > 0) {
-      next.paperclipBoardApiTokenRefs = mergedBoardTokenRefs;
-    } else {
-      delete next.paperclipBoardApiTokenRefs;
-    }
-  } else if (currentBoardTokenRefs) {
-    next.paperclipBoardApiTokenRefs = currentBoardTokenRefs;
-  }
-
-  return next;
+  return {
+    configJson,
+    setConfigJson,
+    loading,
+    saving,
+    error,
+    save
+  };
 }
