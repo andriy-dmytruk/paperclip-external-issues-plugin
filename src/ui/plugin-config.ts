@@ -1,14 +1,21 @@
 import { useEffect, useState } from 'react';
+import {
+  DEFAULT_JIRA_ISSUE_TYPE,
+  PROVIDER_TYPE_OPTIONS,
+  getProviderTypeLabel,
+  type ProviderConfig,
+  type ProviderType
+} from '../providers/shared/config.ts';
+export {
+  DEFAULT_JIRA_ISSUE_TYPE,
+  PROVIDER_TYPE_OPTIONS,
+  getProviderTypeLabel
+} from '../providers/shared/config.ts';
+export type { ProviderType } from '../providers/shared/config.ts';
 
 const PLUGIN_ID = 'paperclip-jira-plugin';
 
-export const DEFAULT_JIRA_ISSUE_TYPE = 'Task';
 export const JIRA_ISSUE_TYPE_OPTIONS = ['Task', 'Bug', 'Story', 'Epic', 'Sub-task'] as const;
-export const PROVIDER_TYPE_OPTIONS = ['jira'] as const;
-export type ProviderType = (typeof PROVIDER_TYPE_OPTIONS)[number];
-export const PROVIDER_TYPE_LABELS: Record<ProviderType, string> = {
-  jira: 'Jira'
-};
 
 export interface ProviderDirectoryEntry {
   providerId: string;
@@ -18,16 +25,17 @@ export interface ProviderDirectoryEntry {
   tokenSaved?: boolean;
 }
 
-export interface JiraProviderConfig {
-  id: string;
-  type: ProviderType;
-  name: string;
+export type JiraProviderConfig = ProviderConfig & {
   jiraBaseUrl?: string;
   jiraUserEmail?: string;
   jiraToken?: string;
   jiraTokenRef?: string;
   defaultIssueType?: string;
-}
+  githubApiBaseUrl?: string;
+  githubToken?: string;
+  githubTokenRef?: string;
+  defaultRepository?: string;
+};
 
 export interface JiraPluginConfig {
   providers?: JiraProviderConfig[];
@@ -113,12 +121,4 @@ export function usePluginConfig() {
     error,
     save
   };
-}
-
-export function getProviderTypeLabel(type: ProviderType | string | undefined): string {
-  if (type === 'jira') {
-    return PROVIDER_TYPE_LABELS.jira;
-  }
-
-  return 'Unknown provider';
 }

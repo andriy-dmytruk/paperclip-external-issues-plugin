@@ -18,6 +18,11 @@ import {
   type ProviderType
 } from './plugin-config.js';
 import {
+  isGitHubProviderType,
+  isJiraProviderType,
+  normalizeProviderConfig
+} from '../providers/shared/config.ts';
+import {
   formatJiraUserLabel,
   formatJiraUserSecondary,
   type JiraUserReference
@@ -624,16 +629,13 @@ function hasLegacyProviderConfig(config: JiraPluginConfig): boolean {
 
 function buildConfiguredProviders(config: JiraPluginConfig): JiraProviderConfig[] {
   if (Array.isArray(config.providers) && config.providers.length > 0) {
-    return config.providers.map((provider, index) => ({
-      id: provider.id || `provider-${index + 1}`,
-      type: 'jira',
-      name: provider.name || `Provider ${index + 1}`,
-      jiraBaseUrl: provider.jiraBaseUrl,
-      jiraUserEmail: provider.jiraUserEmail,
-      jiraToken: provider.jiraToken,
-      jiraTokenRef: provider.jiraTokenRef,
-      defaultIssueType: provider.defaultIssueType || DEFAULT_JIRA_ISSUE_TYPE
-    }));
+    return config.providers
+      .map((provider, index) => normalizeProviderConfig({
+        ...provider,
+        id: provider.id || `provider-${index + 1}`,
+        name: provider.name || `Provider ${index + 1}`
+      }, index))
+      .filter((provider): provider is JiraProviderConfig => provider !== null);
   }
 
   if (!hasLegacyProviderConfig(config)) {
@@ -642,7 +644,7 @@ function buildConfiguredProviders(config: JiraPluginConfig): JiraProviderConfig[
 
   return [{
     id: 'provider-default-jira',
-    type: 'jira',
+    type: 'jira_dc',
     name: 'Default Jira',
     jiraBaseUrl: config.jiraBaseUrl,
     jiraUserEmail: config.jiraUserEmail,
@@ -659,10 +661,53 @@ function createProviderId(): string {
 function createEmptyProviderDraft(): JiraProviderConfig {
   return {
     id: createProviderId(),
-    type: 'jira',
+    type: 'jira_dc',
     name: '',
     defaultIssueType: DEFAULT_JIRA_ISSUE_TYPE
   };
+}
+
+function getProviderBaseUrl(provider: JiraProviderConfig | null | undefined): string {
+  return provider && isJiraProviderType(provider.type) ? (provider.jiraBaseUrl ?? '') : '';
+}
+
+function getProviderUserEmail(provider: JiraProviderConfig | null | undefined): string {
+  return provider && isJiraProviderType(provider.type) ? (provider.jiraUserEmail ?? '') : '';
+}
+
+function getProviderDefaultIssueType(provider: JiraProviderConfig | null | undefined): string {
+  return provider && isJiraProviderType(provider.type) ? (provider.defaultIssueType ?? DEFAULT_JIRA_ISSUE_TYPE) : DEFAULT_JIRA_ISSUE_TYPE;
+}
+
+function getProviderTokenRef(provider: JiraProviderConfig | null | undefined): string | undefined {
+  if (!provider) {
+    return undefined;
+  }
+
+  return isJiraProviderType(provider.type) ? provider.jiraTokenRef : provider.githubTokenRef;
+}
+
+function getProviderToken(provider: JiraProviderConfig | null | undefined): string | undefined {
+  if (!provider) {
+    return undefined;
+  }
+
+  return isJiraProviderType(provider.type) ? provider.jiraToken : provider.githubToken;
+}
+
+function getProviderApiBase(provider: JiraProviderConfig | null | undefined): string {
+  if (!provider) {
+    return '';
+  }
+
+  return isJiraProviderType(provider.type)
+    ? (provider.jiraBaseUrl ?? '')
+    : (provider.githubApiBaseUrl ?? '');
+}
+
+function normalizeUpstreamProjectKey(value: string, providerType?: ProviderType): string {
+  const trimmed = value.trim();
+  return isGitHubProviderType(providerType) ? trimmed : trimmed.toUpperCase();
 }
 
 function createEmptyMappingRow(providerId = '', defaultAssignee?: JiraUserReference | null): MappingRow {
@@ -1113,6 +1158,8 @@ function SyncCenterSurface(props: {
       jiraBaseUrl?: string;
       jiraUserEmail?: string;
       defaultIssueType?: string;
+      githubApiBaseUrl?: string;
+      defaultRepository?: string;
       tokenSaved?: boolean;
     } | null;
     projectSettings?: {
@@ -1164,6 +1211,8 @@ function SyncCenterSurface(props: {
       jiraBaseUrl?: string;
       jiraUserEmail?: string;
       defaultIssueType?: string;
+      githubApiBaseUrl?: string;
+      defaultRepository?: string;
     };
     tokenSaved?: boolean;
     backTarget?: string;
@@ -1203,7 +1252,7 @@ function SyncCenterSurface(props: {
     companyId: string;
     projectId?: string;
     providerId?: string;
-    providerKey: string;
+    providerKey?: ProviderType;
     config: JiraProviderConfig;
   }>('sync.provider.testConnection');
   const refreshIdentity = useActionRunner<{
@@ -1213,7 +1262,7 @@ function SyncCenterSurface(props: {
   }>('sync.project.refreshIdentity');
   const runSync = useActionRunner<{
     companyId: string;
-    providerKey: string;
+    providerKey?: ProviderType;
     projectId?: string;
     issueId?: string;
   }>('sync.runNow');
@@ -1374,9 +1423,16 @@ function SyncCenterSurface(props: {
       id: existingProvider?.id ?? selectedProviderDetailId ?? createProviderId(),
       type: providerDetail.data?.providerType ?? existingProvider?.type ?? newProviderType,
       name: detailFields?.name ?? existingProvider?.name ?? '',
-      jiraBaseUrl: detailFields?.jiraBaseUrl ?? existingProvider?.jiraBaseUrl ?? '',
-      jiraUserEmail: detailFields?.jiraUserEmail ?? existingProvider?.jiraUserEmail ?? '',
-      defaultIssueType: detailFields?.defaultIssueType ?? existingProvider?.defaultIssueType ?? DEFAULT_JIRA_ISSUE_TYPE
+      ...(isGitHubProviderType(providerDetail.data?.providerType ?? existingProvider?.type ?? newProviderType)
+        ? {
+            githubApiBaseUrl: detailFields?.githubApiBaseUrl ?? (existingProvider && isGitHubProviderType(existingProvider.type) ? existingProvider.githubApiBaseUrl : '') ?? '',
+            defaultRepository: detailFields?.defaultRepository ?? (existingProvider && isGitHubProviderType(existingProvider.type) ? existingProvider.defaultRepository : '') ?? ''
+          }
+        : {
+            jiraBaseUrl: detailFields?.jiraBaseUrl ?? getProviderBaseUrl(existingProvider) ?? '',
+            jiraUserEmail: detailFields?.jiraUserEmail ?? getProviderUserEmail(existingProvider) ?? '',
+            defaultIssueType: detailFields?.defaultIssueType ?? getProviderDefaultIssueType(existingProvider)
+          })
     });
     setProviderDraftToken('');
   }, [configuredProviders, currentPage, newProviderType, providerDetail.data, selectedProviderDetailId]);
@@ -1421,7 +1477,7 @@ function SyncCenterSurface(props: {
 
     const nextRow: MappingRow = {
       ...mappingModal.draft,
-      jiraProjectKey: mappingModal.draft.jiraProjectKey.trim().toUpperCase(),
+      jiraProjectKey: normalizeUpstreamProjectKey(mappingModal.draft.jiraProjectKey, selectedProvider?.type),
       jiraJql: mappingModal.draft.jiraJql,
       paperclipProjectId: activeProjectId,
       paperclipProjectName: activeProject?.projectName ?? projectPage.data?.projectName ?? mappingModal.draft.paperclipProjectName,
@@ -1560,12 +1616,21 @@ function SyncCenterSurface(props: {
     const nextProvider: JiraProviderConfig = {
       ...providerDraft,
       id: providerDraft.id || createProviderId(),
-      type: providerDraft.type ?? 'jira',
-      name: providerDraft.name.trim(),
-      jiraBaseUrl: providerDraft.jiraBaseUrl?.trim() || undefined,
-      jiraUserEmail: providerDraft.jiraUserEmail?.trim() || undefined,
-      defaultIssueType: providerDraft.defaultIssueType?.trim() || DEFAULT_JIRA_ISSUE_TYPE
+      type: providerDraft.type ?? 'jira_dc',
+      name: providerDraft.name.trim()
     };
+    if (isJiraProviderType(nextProvider.type)) {
+      Object.assign(nextProvider, {
+        jiraBaseUrl: providerDraft.jiraBaseUrl?.trim() || undefined,
+        jiraUserEmail: providerDraft.jiraUserEmail?.trim() || undefined,
+        defaultIssueType: providerDraft.defaultIssueType?.trim() || DEFAULT_JIRA_ISSUE_TYPE
+      });
+    } else {
+      Object.assign(nextProvider, {
+        githubApiBaseUrl: providerDraft.githubApiBaseUrl?.trim() || undefined,
+        defaultRepository: providerDraft.defaultRepository?.trim() || undefined
+      });
+    }
     if (!nextProvider.name) {
       setLocalResult({
         message: 'Provider name is required.',
@@ -1576,17 +1641,21 @@ function SyncCenterSurface(props: {
 
     const existingProvider = configuredProviders.find((entry) => entry.id === nextProvider.id);
     const replacementToken = providerDraftToken.trim();
-    const tokenRef = existingProvider?.jiraTokenRef?.trim() || undefined;
+    const tokenRef = getProviderTokenRef(existingProvider)?.trim() || undefined;
     const nextProviders = [
       ...configuredProviders.filter((provider) => provider.id !== nextProvider.id),
       {
         ...nextProvider,
         ...(replacementToken
-          ? { jiraToken: replacementToken, jiraTokenRef: undefined }
+          ? (isJiraProviderType(nextProvider.type)
+              ? { jiraToken: replacementToken, jiraTokenRef: undefined }
+              : { githubToken: replacementToken, githubTokenRef: undefined })
           : tokenRef
-            ? { jiraTokenRef: tokenRef }
-            : existingProvider?.jiraToken
-              ? { jiraToken: existingProvider.jiraToken }
+            ? (isJiraProviderType(nextProvider.type) ? { jiraTokenRef: tokenRef } : { githubTokenRef: tokenRef })
+            : getProviderToken(existingProvider)
+              ? (isJiraProviderType(nextProvider.type)
+                  ? { jiraToken: getProviderToken(existingProvider) }
+                  : { githubToken: getProviderToken(existingProvider) })
               : {})
       }
     ];
@@ -1683,15 +1752,23 @@ function SyncCenterSurface(props: {
       companyId,
       projectId: activeProjectId || undefined,
       providerId: selectedProvider.id,
-      providerKey: 'jira',
-      config: {
-        ...selectedProvider,
-        jiraBaseUrl: selectedProvider.jiraBaseUrl?.trim() || undefined,
-        jiraUserEmail: selectedProvider.jiraUserEmail?.trim() || undefined,
-        defaultIssueType: selectedProvider.defaultIssueType?.trim() || DEFAULT_JIRA_ISSUE_TYPE,
-        ...(selectedProviderToken.trim() ? { jiraToken: selectedProviderToken.trim(), jiraTokenRef: undefined } : {}),
-        ...(selectedProvider.jiraTokenRef?.trim() ? { jiraTokenRef: selectedProvider.jiraTokenRef.trim() } : {})
-      }
+      providerKey: selectedProvider.type,
+      config: isJiraProviderType(selectedProvider.type)
+        ? {
+            ...selectedProvider,
+            jiraBaseUrl: selectedProvider.jiraBaseUrl?.trim() || undefined,
+            jiraUserEmail: selectedProvider.jiraUserEmail?.trim() || undefined,
+            defaultIssueType: selectedProvider.defaultIssueType?.trim() || DEFAULT_JIRA_ISSUE_TYPE,
+            ...(selectedProviderToken.trim() ? { jiraToken: selectedProviderToken.trim(), jiraTokenRef: undefined } : {}),
+            ...(selectedProvider.jiraTokenRef?.trim() ? { jiraTokenRef: selectedProvider.jiraTokenRef.trim() } : {})
+          }
+        : {
+            ...selectedProvider,
+            githubApiBaseUrl: selectedProvider.githubApiBaseUrl?.trim() || undefined,
+            defaultRepository: selectedProvider.defaultRepository?.trim() || undefined,
+            ...(selectedProviderToken.trim() ? { githubToken: selectedProviderToken.trim(), githubTokenRef: undefined } : {}),
+            ...(selectedProvider.githubTokenRef?.trim() ? { githubTokenRef: selectedProvider.githubTokenRef.trim() } : {})
+          }
     });
     await refreshSyncData();
   }
@@ -1703,8 +1780,8 @@ function SyncCenterSurface(props: {
     }
     await runSync.run({
       companyId,
-      providerKey: 'jira',
       projectId: activeProjectId,
+      ...(selectedProvider?.type ? { providerKey: selectedProvider.type } : {}),
       ...(props.scopeIssueId ? { issueId: props.scopeIssueId } : {})
     });
     await refreshSyncData();
@@ -2326,50 +2403,83 @@ function SyncCenterSurface(props: {
                   } : null)}
                 />
               </label>
+              {isJiraProviderType(providerDraft.type) ? (
+                <>
+                  <label style={stackStyle(6)}>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>Jira base URL</span>
+                    <input
+                      style={inputStyle()}
+                      value={providerDraft.jiraBaseUrl ?? ''}
+                      placeholder="https://jira.example.com"
+                      onChange={(event) => setProviderDraft((current) => current ? {
+                        ...current,
+                        jiraBaseUrl: event.target.value
+                      } : null)}
+                    />
+                  </label>
+                  <div style={{ fontSize: 12, opacity: 0.75 }}>
+                    Use only the Jira host. Project keys belong on project mappings, not on the provider record.
+                  </div>
+                  <label style={stackStyle(6)}>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>Jira user email</span>
+                    <input
+                      style={inputStyle()}
+                      value={providerDraft.jiraUserEmail ?? ''}
+                      placeholder="Optional for Basic auth Jira setups"
+                      onChange={(event) => setProviderDraft((current) => current ? {
+                        ...current,
+                        jiraUserEmail: event.target.value
+                      } : null)}
+                    />
+                  </label>
+                  <label style={stackStyle(6)}>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>Default issue type</span>
+                    <select
+                      style={inputStyle()}
+                      value={providerDraft.defaultIssueType ?? DEFAULT_JIRA_ISSUE_TYPE}
+                      onChange={(event) => setProviderDraft((current) => current ? {
+                        ...current,
+                        defaultIssueType: event.target.value
+                      } : null)}
+                    >
+                      {JIRA_ISSUE_TYPE_OPTIONS.map((issueType) => (
+                        <option key={issueType} value={issueType}>{issueType}</option>
+                      ))}
+                    </select>
+                  </label>
+                </>
+              ) : (
+                <>
+                  <label style={stackStyle(6)}>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>GitHub API base URL</span>
+                    <input
+                      style={inputStyle()}
+                      value={providerDraft.githubApiBaseUrl ?? ''}
+                      placeholder="https://api.github.com"
+                      onChange={(event) => setProviderDraft((current) => current ? {
+                        ...current,
+                        githubApiBaseUrl: event.target.value
+                      } : null)}
+                    />
+                  </label>
+                  <label style={stackStyle(6)}>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>Default repository</span>
+                    <input
+                      style={inputStyle()}
+                      value={providerDraft.defaultRepository ?? ''}
+                      placeholder="owner/repo"
+                      onChange={(event) => setProviderDraft((current) => current ? {
+                        ...current,
+                        defaultRepository: event.target.value
+                      } : null)}
+                    />
+                  </label>
+                </>
+              )}
               <label style={stackStyle(6)}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>Jira base URL</span>
-                <input
-                  style={inputStyle()}
-                  value={providerDraft.jiraBaseUrl ?? ''}
-                  placeholder="https://jira.example.com"
-                  onChange={(event) => setProviderDraft((current) => current ? {
-                    ...current,
-                    jiraBaseUrl: event.target.value
-                  } : null)}
-                />
-              </label>
-              <div style={{ fontSize: 12, opacity: 0.75 }}>
-                Use only the Jira host. Project keys belong on project mappings, not on the provider record.
-              </div>
-              <label style={stackStyle(6)}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>Jira user email</span>
-                <input
-                  style={inputStyle()}
-                  value={providerDraft.jiraUserEmail ?? ''}
-                  placeholder="Optional for Basic auth Jira setups"
-                  onChange={(event) => setProviderDraft((current) => current ? {
-                    ...current,
-                    jiraUserEmail: event.target.value
-                  } : null)}
-                />
-              </label>
-              <label style={stackStyle(6)}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>Default issue type</span>
-                <select
-                  style={inputStyle()}
-                  value={providerDraft.defaultIssueType ?? DEFAULT_JIRA_ISSUE_TYPE}
-                  onChange={(event) => setProviderDraft((current) => current ? {
-                    ...current,
-                    defaultIssueType: event.target.value
-                  } : null)}
-                >
-                  {JIRA_ISSUE_TYPE_OPTIONS.map((issueType) => (
-                    <option key={issueType} value={issueType}>{issueType}</option>
-                  ))}
-                </select>
-              </label>
-              <label style={stackStyle(6)}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>Jira API token</span>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>
+                  {isJiraProviderType(providerDraft.type) ? 'Jira API token' : 'GitHub token'}
+                </span>
                 <input
                   style={inputStyle()}
                   type="password"
@@ -2377,7 +2487,7 @@ function SyncCenterSurface(props: {
                   placeholder={
                     providerDetail.data?.tokenSaved
                       ? 'Saved token is hidden. Enter a new token only to replace it.'
-                      : 'Paste Jira API token'
+                      : (isJiraProviderType(providerDraft.type) ? 'Paste Jira API token' : 'Paste GitHub token')
                   }
                   onChange={(event) => setProviderDraftToken(event.target.value)}
                 />
@@ -2391,13 +2501,20 @@ function SyncCenterSurface(props: {
                     companyId,
                     providerId: providerDraft.id,
                     providerKey: providerDraft.type,
-                    config: {
-                      ...providerDraft,
-                      jiraBaseUrl: providerDraft.jiraBaseUrl?.trim() || undefined,
-                      jiraUserEmail: providerDraft.jiraUserEmail?.trim() || undefined,
-                      defaultIssueType: providerDraft.defaultIssueType?.trim() || DEFAULT_JIRA_ISSUE_TYPE,
-                      ...(providerDraftToken.trim() ? { jiraToken: providerDraftToken.trim() } : {})
-                    }
+                    config: isJiraProviderType(providerDraft.type)
+                      ? {
+                          ...providerDraft,
+                          jiraBaseUrl: providerDraft.jiraBaseUrl?.trim() || undefined,
+                          jiraUserEmail: providerDraft.jiraUserEmail?.trim() || undefined,
+                          defaultIssueType: providerDraft.defaultIssueType?.trim() || DEFAULT_JIRA_ISSUE_TYPE,
+                          ...(providerDraftToken.trim() ? { jiraToken: providerDraftToken.trim() } : {})
+                        }
+                      : {
+                          ...providerDraft,
+                          githubApiBaseUrl: providerDraft.githubApiBaseUrl?.trim() || undefined,
+                          defaultRepository: providerDraft.defaultRepository?.trim() || undefined,
+                          ...(providerDraftToken.trim() ? { githubToken: providerDraftToken.trim() } : {})
+                        }
                   })}
                 >
                   {buttonLabel('sync', testConnection.busy ? 'Testing…' : 'Test connection')}

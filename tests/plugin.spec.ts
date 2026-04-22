@@ -273,7 +273,7 @@ test('settings registration exposes provider-aware popup data and per-mapping fi
     companyId: 'company-1'
   });
 
-  assert.equal(popupState.selectedProviderKey, 'jira');
+  assert.equal(popupState.selectedProviderKey, 'jira_dc');
   assert.equal(popupState.selectedProviderId, 'provider-default-jira');
   assert.equal(popupState.mappings[0]?.providerId, 'provider-default-jira');
   assert.equal(popupState.mappings[0]?.filters?.onlyActive, true);
@@ -294,7 +294,7 @@ test('settings registration exposes provider-aware popup data and per-mapping fi
   assert.equal(popupState.syncProgress?.status, 'idle');
   assert.equal(popupState.availableProjects[0]?.id, 'project-1');
   assert.equal(popupState.providers[0]?.providerId, 'provider-default-jira');
-  assert.equal(providers.providers[0]?.providerKey, 'jira');
+  assert.equal(providers.providers[0]?.providerKey, 'jira_dc');
   assert.equal(providers.providers[0]?.displayName, 'Default Jira');
 });
 
@@ -406,12 +406,12 @@ test('project-first sync data contracts expose entry, project, and provider page
   assert.equal(projectPage.showSyncActions, true);
   assert.equal(projectPage.navigationContext?.surface, 'project');
   assert.equal(providerDirectory.providers[0]?.providerId, 'provider-default-jira');
-  assert.equal(providerDirectory.providers[0]?.providerType, 'jira');
+  assert.equal(providerDirectory.providers[0]?.providerType, 'jira_dc');
   assert.equal(providerDirectory.providers[0]?.displayName, 'Default Jira');
   assert.equal(providerDirectory.providers[0]?.tokenSaved, true);
   assert.equal(providerDetail.mode, 'edit');
   assert.equal(providerDetail.providerId, 'provider-default-jira');
-  assert.equal(providerDetail.providerType, 'jira');
+  assert.equal(providerDetail.providerType, 'jira_dc');
   assert.equal(providerDetail.backTarget, 'providers');
   assert.equal(providerDetail.fields?.name, 'Default Jira');
 });
@@ -1946,7 +1946,7 @@ test('issue.setUpstreamAssignee updates the Jira assignee and refreshes upstream
       issueId: 'issue-1'
     });
 
-    assert.match(result.message, /Updated Jira assignee to New Owner/);
+    assert.match(result.message, /Updated upstream assignee to New Owner/);
     assert.equal(presentation.upstream?.jiraAssigneeDisplayName, 'New Owner');
     assert.equal(presentation.upstream?.jiraCreatorDisplayName, 'Issue Creator');
   } finally {
@@ -2058,7 +2058,7 @@ test('issue.setUpstreamStatus transitions the Jira issue and refreshes upstream 
       issueId: 'issue-1'
     });
 
-    assert.match(result.message, /Updated Jira status to Done/);
+    assert.match(result.message, /Updated upstream status to Done/);
     assert.equal(presentation.upstreamStatus?.name, 'Done');
     assert.equal(presentation.upstreamStatus?.category, 'Done');
     assert.equal(presentation.upstream?.jiraAssigneeDisplayName, 'Paperclip Owner');
@@ -2162,7 +2162,7 @@ test('issue.setUpstreamStatus tolerates the Paperclip 204 bridge response bug', 
       issueId: 'issue-1'
     });
 
-    assert.match(result.message, /Updated Jira status to Done/);
+    assert.match(result.message, /Updated upstream status to Done/);
     assert.equal(presentation.isSynced, true);
     assert.equal(presentation.upstreamStatus?.name, 'Done');
     assert.equal(presentation.upstreamStatus?.category, 'Done');
@@ -2270,7 +2270,7 @@ test('issue sync presentation and upstream status action recover a missing link 
     assert.equal(presentation.isSynced, true);
     assert.equal(presentation.upstreamIssueKey, 'GRB-318');
     assert.equal(presentation.upstreamStatus?.name, 'Backlog');
-    assert.match(transitionResult.message, /Updated Jira status to Done/);
+    assert.match(transitionResult.message, /Updated upstream status to Done/);
     assert.equal(refreshedPresentation.isSynced, true);
     assert.equal(refreshedPresentation.upstreamStatus?.name, 'Done');
   } finally {

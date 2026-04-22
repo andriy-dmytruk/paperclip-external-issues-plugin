@@ -1,8 +1,8 @@
 # paperclip-jira-plugin
 
-Jira Sync is a Paperclip plugin for teams that plan in Paperclip but still need Jira to remain the upstream system of record.
+Issue Sync is a Paperclip plugin for teams that plan in Paperclip but still need an upstream issue tracker to remain the system of record.
 
-The plugin maps Jira projects or JQL feeds into Paperclip projects, imports issues into Paperclip, and adds issue-level plus comment-level sync controls so teams can decide when to pull from Jira and when to push local changes upstream.
+The plugin currently supports Jira Data Center end-to-end, keeps legacy single-provider Jira installs working, and now has the provider-platform foundations for Jira Cloud and GitHub Issues behind the same Paperclip sync UI.
 
 ## What this repo contains
 
@@ -13,14 +13,14 @@ The plugin maps Jira projects or JQL feeds into Paperclip projects, imports issu
 
 ## Current shape
 
-This version now has a fuller Jira-first sync flow:
+This version now has a fuller provider-aware sync flow:
 
-- the hosted sync center lets users create reusable Jira providers, while project and issue sync surfaces configure one Paperclip project at a time
+- the hosted sync center lets users create reusable upstream providers, while project and issue sync surfaces configure one Paperclip project at a time
 - the settings surface is now provider-only, and project-scoped sync opens on a dedicated page for the selected Paperclip project instead of mixing all project settings in one view
-- provider definitions live in plugin config so one Jira connection can be reused across many Paperclip projects
+- provider definitions live in plugin config so one upstream connection can be reused across many Paperclip projects
 - providers are managed on their own settings page, and each provider opens on its own detail page with `Back` navigation instead of a nested popup
 - legacy single-provider config using `jiraBaseUrl`, `jiraUserEmail`, `jiraToken`, or `jiraTokenRef` still works as a migration path
-- saved Jira tokens stay hidden in the UI; users only enter a new token when they want to replace it
+- saved provider tokens stay hidden in the UI; users only enter a new token when they want to replace it
 - each Paperclip project keeps its own selected provider, default assignee, default status, cadence, and Jira mappings inside plugin state
 - each Paperclip project can define a default Jira-to-Paperclip status plus explicit Jira status mappings such as `Done -> done`, and each mapping row can optionally assign a Paperclip agent or `None`
 - a project can explicitly stay on `Provider: None`, which keeps it Paperclip-only while still allowing `Hide imported issues` for previously imported Jira work
@@ -41,6 +41,8 @@ This version now has a fuller Jira-first sync flow:
 - the main `Sync issues` action saves project settings automatically before it runs
 - `Hide imported issues` only targets the selected project and can hide untouched imported Jira issues from active Paperclip views
 - the hide dialog still opens for an empty-state review, and hidden imported issues are restored automatically if the same Jira issue appears again on a later sync
+- provider adapters now live behind a shared registry and typed capabilities so new trackers can be added without rewriting the sync shell
+- Jira Data Center continues to use the checked-in generated OpenAPI client, while GitHub provider wiring uses the official Octokit client
 
 ## Important note on Atlassian MCP
 
@@ -74,5 +76,5 @@ Notes:
 - add richer Jira field mapping beyond summary, description, comments, and status
 - support safer conflict handling so pull sync can avoid overwriting local Paperclip edits automatically
 - support comment pull updates instead of only importing unseen Jira comments
-- add optional provider adapters so the worker can target direct Jira REST, an Atlassian MCP proxy, or another issue system behind the same sync UI
+- expand Jira Cloud and GitHub Issues from the shared provider platform to full parity with the current Jira Data Center workflow
 - extend Paperclip core so issue lists can show synced/local state natively instead of only inside plugin surfaces

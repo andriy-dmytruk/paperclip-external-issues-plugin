@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module';
 import type { PaperclipPluginManifestV1 } from '@paperclipai/plugin-sdk';
+import { PROVIDER_TYPE_OPTIONS } from './providers/shared/types.ts';
 
 const require = createRequire(import.meta.url);
 const packageJson = require('../package.json') as { version?: unknown };
@@ -16,7 +17,7 @@ export const manifest: PaperclipPluginManifestV1 = {
   apiVersion: 1,
   version: MANIFEST_VERSION,
   displayName: 'Issue Sync',
-  description: 'Synchronize Jira issues into Paperclip projects and sync issue/comment changes both ways.',
+  description: 'Synchronize upstream issues into Paperclip projects and sync issue/comment changes both ways.',
   author: 'Andriy Dmytruk',
   categories: ['connector', 'ui'],
   capabilities: [
@@ -48,13 +49,17 @@ export const manifest: PaperclipPluginManifestV1 = {
           type: 'object',
           properties: {
             id: { type: 'string' },
-            type: { type: 'string', enum: ['jira'] },
+            type: { type: 'string', enum: ['jira', ...PROVIDER_TYPE_OPTIONS] },
             name: { type: 'string' },
             jiraBaseUrl: { type: 'string' },
             jiraUserEmail: { type: 'string' },
             jiraToken: { type: 'string' },
             jiraTokenRef: { type: 'string' },
-            defaultIssueType: { type: 'string' }
+            defaultIssueType: { type: 'string' },
+            githubApiBaseUrl: { type: 'string' },
+            githubToken: { type: 'string' },
+            githubTokenRef: { type: 'string' },
+            defaultRepository: { type: 'string' }
           }
         }
       },

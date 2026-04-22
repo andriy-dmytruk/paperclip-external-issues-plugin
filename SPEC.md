@@ -1,16 +1,16 @@
 # Jira Sync plugin specification
 
-Jira Sync is a Paperclip plugin for synchronizing Jira issues into Paperclip projects while keeping Paperclip usable as the primary planning surface.
+Issue Sync is a Paperclip plugin for synchronizing upstream issues into Paperclip projects while keeping Paperclip usable as the primary planning surface.
 
 ## MVP requirements
 
 - The plugin MUST register successfully in Paperclip.
 - The plugin MUST expose a settings page, dashboard widget, task detail contribution, comment annotation contribution, and toolbar actions.
-- The settings page MUST expose a provider-aware Jira settings surface that saves reusable Jira provider definitions separately from Paperclip project-scoped Jira sync settings.
+- The settings page MUST expose a provider-aware settings surface that saves reusable provider definitions separately from Paperclip project-scoped sync settings.
 - Project-scoped sync MUST open a dedicated sync page for one Paperclip project at a time from project or issue sync surfaces instead of the global settings page.
-- The worker MUST read Jira connection details from plugin config using saved provider records. Legacy single-provider fields (`jiraBaseUrl`, `jiraUserEmail`, `jiraToken`, `jiraTokenRef`, `defaultIssueType`) SHOULD continue to work as a migration path.
+- The worker MUST read provider connection details from plugin config using saved provider records. Legacy single-provider Jira fields (`jiraBaseUrl`, `jiraUserEmail`, `jiraToken`, `jiraTokenRef`, `defaultIssueType`) SHOULD continue to work as a migration path.
 - The worker MUST NOT persist the raw Jira token in plugin state.
-- The sync center MUST support an explicit Jira connection test, MUST keep an existing token hidden in the UI, and MUST allow creating or editing a provider on its own dedicated page with `Back` navigation instead of a nested popup.
+- The sync center MUST support an explicit provider connection test, MUST keep an existing token hidden in the UI, and MUST allow creating or editing a provider on its own dedicated page with `Back` navigation instead of a nested popup.
 - The sync center MUST let a Paperclip project explicitly choose `Provider: None` without falling back to the first saved Jira provider.
 - Before a provider is selected for a project, the sync center MUST hide provider-specific project settings and sync actions while keeping `Hide imported issues` available.
 - The sync flow MUST import Jira issues into the selected Paperclip project's configured Jira mappings.
@@ -35,6 +35,10 @@ Jira Sync is a Paperclip plugin for synchronizing Jira issues into Paperclip pro
 - Sync mappings MUST carry their own upstream issue filters so teams can tune each configured Paperclip project independently.
 - Project default assignee and mapping author/assignee filters MUST use structured Jira user references keyed by durable Jira identity, not plain display text.
 - The worker MUST expose Jira current-user resolution and Jira user search so the hosted UI can drive project-default and mapping-user autocomplete.
+- The worker MUST expose typed provider interfaces and a registry so new providers can be added without changing the shared sync shell.
+- Provider transports SHOULD prefer generated OpenAPI clients or official maintained SDKs when they exist.
+- Jira Data Center MUST continue using the checked-in generated OpenAPI client.
+- GitHub Issues integration SHOULD use the official Octokit client.
 - Jira-linked issue detail SHOULD surface both the upstream Jira assignee and the upstream Jira creator.
 - Jira-linked issue detail SHOULD refresh live Jira assignee, creator, status, and comments when the detail view loads so the UI does not depend only on stale cached link metadata.
 - The primary `Sync issues` action MUST save provider and project sync edits before running sync.
