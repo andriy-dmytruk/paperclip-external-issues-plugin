@@ -15,21 +15,30 @@ The plugin maps Jira projects or JQL feeds into Paperclip projects, imports issu
 
 This version now has a fuller Jira-first sync flow:
 
-- the hosted sync center lets users create reusable Jira providers, then configure sync one Paperclip project at a time
+- the hosted sync center lets users create reusable Jira providers, while project and issue sync surfaces configure one Paperclip project at a time
+- the settings surface is now provider-only, and project-scoped sync opens on a dedicated page for the selected Paperclip project instead of mixing all project settings in one view
 - provider definitions live in plugin config so one Jira connection can be reused across many Paperclip projects
+- providers are managed on their own settings page, and each provider opens on its own detail page with `Back` navigation instead of a nested popup
 - legacy single-provider config using `jiraBaseUrl`, `jiraUserEmail`, `jiraToken`, or `jiraTokenRef` still works as a migration path
 - saved Jira tokens stay hidden in the UI; users only enter a new token when they want to replace it
 - each Paperclip project keeps its own selected provider, default assignee, default status, cadence, and Jira mappings inside plugin state
+- each Paperclip project can define a default Jira-to-Paperclip status plus explicit Jira status mappings such as `Done -> done`, and each mapping row can optionally assign a Paperclip agent or `None`
 - a project can explicitly stay on `Provider: None`, which keeps it Paperclip-only while still allowing `Hide imported issues` for previously imported Jira work
-- opening `Sync Issues` from a project now scopes the modal to that project, while the global surface starts with a project picker
+- opening `Sync Issues` from a project or issue now scopes the modal to the current project, while the settings surface stays focused on provider management
+- before a provider is selected on a project page, the only available action besides provider selection is `Hide imported issues`
 - manual and scheduled sync report processed, total, imported, updated, skipped, and failed counts
 - synced issues keep their Paperclip local status separate from Jira upstream status metadata
+- when a project configures Jira-to-Paperclip status mappings, Jira import/pull/transition refreshes can also update the local Paperclip status to match the mapped workflow state
 - issue detail only presents an issue as Jira-linked when the current Paperclip issue still carries its Jira sync markers, which avoids stale-link UI on fresh local issues
-- synced issues use a stable `[JIRA-123]` title prefix fallback and expose a visible `Open in Jira` action
-- comments on Jira-linked issues show whether they were fetched from Jira, already uploaded, or still local to Paperclip
-- project sync settings prefill the default assignee from the current Jira user when possible and use Jira-backed autocomplete for both the project default assignee and mapping assignee filters
+- pure local issues in configured projects now expose a `Create upstream issue` action, and synced issues use a stable `[JIRA-123]` title prefix fallback plus a visible `Open in Jira` action
+- issue detail and sync controls now use Paperclip-style neutral icon-first buttons with subtler transparent backgrounds so dark mode matches the host styling more closely
+- comments on Jira-linked issues show whether they were imported, published upstream, or still local to Paperclip
+- synced issue detail now includes a collapsed Jira comments list above the composer
+- synced issue detail always posts new comments on linked issues to Jira
+- project sync settings prefill the default assignee from the current Jira user when possible and use Jira-backed autocomplete for the project default assignee plus mapping author and assignee filters
+- synced issue detail now shows both the upstream Jira assignee and the upstream Jira creator, refreshed from live Jira issue data when available
 - new mappings start with `Active only` enabled and default the assignee filter to the current Jira user for the selected provider when available
-- the main `Sync issues` action saves provider and project settings automatically before it runs
+- the main `Sync issues` action saves project settings automatically before it runs
 - `Hide imported issues` only targets the selected project and can hide untouched imported Jira issues from active Paperclip views
 - the hide dialog still opens for an empty-state review, and hidden imported issues are restored automatically if the same Jira issue appears again on a later sync
 

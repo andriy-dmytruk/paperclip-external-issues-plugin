@@ -1,5 +1,27 @@
 import { parseRepositoryReference } from '../github-repo.ts';
 
+export type SyncPageId = 'projects' | 'project' | 'providers' | 'provider-detail';
+
+export interface SyncEntryContext {
+  surface: 'global' | 'project' | 'issue';
+  projectId?: string;
+  issueId?: string;
+  projectName?: string;
+  requiresProjectSelection: boolean;
+}
+
+export function resolveInitialSyncPage(context: SyncEntryContext): SyncPageId {
+  return context.requiresProjectSelection ? 'projects' : 'project';
+}
+
+export function buildProjectPageNavigationTarget(projectId: string): string {
+  return `project:${projectId}`;
+}
+
+export function buildProviderDetailNavigationTarget(providerId?: string): string {
+  return providerId ? `provider:${providerId}` : 'provider:new';
+}
+
 export interface RepositoryMappingSnapshot {
   repositoryUrl: string;
   paperclipProjectId?: string;

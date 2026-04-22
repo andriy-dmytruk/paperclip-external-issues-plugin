@@ -1,10 +1,14 @@
 node_modules
 .DS_Store
+Thumbs.db
 
 dist
 build
 coverage
 *.tsbuildinfo
+*.log
+*.tmp
+*.swp
 
 .env
 .env.*
@@ -15,4 +19,5 @@ output/
 tests/e2e/results/
 .paperclip-sdk
 
+.vscode/
 .idea/

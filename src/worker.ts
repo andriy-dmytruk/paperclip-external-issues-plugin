@@ -25,6 +25,11 @@ const DEFAULT_PROVIDER_ID = 'provider-default-jira';
 
 type PluginSetupContext = Parameters<Parameters<typeof definePlugin>[0]['setup']>[0];
 type PaperclipIssueStatus = Issue['status'];
+const DEFAULT_PAPERCLIP_STATUS: PaperclipIssueStatus = 'todo';
+const DEFAULT_EXPLICIT_STATUS_MAPPINGS: JiraStatusMapping[] = [{
+  jiraStatus: 'Done',
+  paperclipStatus: 'done'
+}];
 
 interface JiraMapping {
   id: string;
@@ -42,6 +47,12 @@ interface JiraProjectMapping {
   jiraProjectKey: string;
   jiraJql?: string;
   filters?: JiraTaskFilters;
+}
+
+interface JiraStatusMapping {
+  jiraStatus: string;
+  paperclipStatus: PaperclipIssueStatus;
+  assigneeAgentId?: string | null;
 }
 
 interface SyncRunState {
@@ -73,7 +84,7 @@ interface JiraUserReference {
 
 interface JiraTaskFilters {
   onlyActive?: boolean;
-  author?: string;
+  author?: JiraUserReference;
   assignee?: JiraUserReference;
   issueNumberGreaterThan?: number;
   issueNumberLessThan?: number;
@@ -97,6 +108,8 @@ interface JiraProjectSyncConfig {
   providerId?: string;
   defaultAssignee?: JiraUserReference;
   defaultStatus?: PaperclipIssueStatus;
+  defaultStatusAssigneeAgentId?: string | null;
+  statusMappings?: JiraStatusMapping[];
   scheduleFrequencyMinutes?: number;
   mappings: JiraProjectMapping[];
   syncState?: SyncRunState;
@@ -116,6 +129,7 @@ interface JiraConfig {
 interface JiraProviderDisplayConfig {
   providerId: string;
   providerName: string;
+  providerType: 'jira';
   baseUrl?: string;
   userEmail?: string;
   defaultIssueType: string;
@@ -150,6 +164,7 @@ interface JiraIssueRecord {
   summary: string;
   description: string;
   assigneeDisplayName?: string;
+  creatorDisplayName?: string;
   statusName: string;
   statusCategory: string;
   updatedAt: string;
@@ -177,6 +192,7 @@ interface JiraIssueLinkData {
   jiraProjectKey: string;
   jiraUrl: string;
   jiraAssigneeDisplayName?: string;
+  jiraCreatorDisplayName?: string;
   jiraStatusName: string;
   jiraStatusCategory: string;
   lastSyncedAt: string;
@@ -198,27 +214,12 @@ interface JiraCommentLinkData {
   lastSyncedAt: string;
 }
 
-const GLOBAL_SYNC_LAUNCHER: PluginLauncherRegistration = {
-  id: 'paperclip-jira-plugin-global-runtime-launcher',
-  displayName: 'Sync Issues',
-  description: 'Open the issue sync dialog.',
-  placementZone: 'globalToolbarButton',
-  action: {
-    type: 'openModal',
-    target: 'JiraSyncLauncherModal'
-  },
-  render: {
-    environment: 'hostOverlay',
-    bounds: 'wide'
-  }
-};
-
 const ENTITY_SYNC_LAUNCHER: PluginLauncherRegistration = {
-  id: 'paperclip-jira-plugin-entity-runtime-launcher',
+  id: 'paperclip-jira-plugin-entity-launcher',
   displayName: 'Sync Issues',
   description: 'Open the issue sync dialog for the current entity.',
   placementZone: 'toolbarButton',
-  entityTypes: ['project', 'issue'],
+  entityTypes: ['project'],
   action: {
     type: 'openModal',
     target: 'JiraSyncLauncherModal'
@@ -236,6 +237,19 @@ function normalizeOptionalString(value: unknown): string | undefined {
 
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function normalizeInputRecord(input: unknown): Record<string, unknown> {
+  const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+  const params = record.params;
+  if (!params || typeof params !== 'object') {
+    return record;
+  }
+
+  return {
+    ...record,
+    ...(params as Record<string, unknown>)
+  };
 }
 
 function normalizeCompanyId(value: unknown): string | undefined {
@@ -289,6 +303,20 @@ function normalizeJiraUserReference(value: unknown): JiraUserReference | undefin
       ? { username: normalizeOptionalString(record.username) ?? normalizeOptionalString(record.name) ?? normalizeOptionalString(record.key) }
       : {})
   };
+}
+
+function getJiraPersonDisplayName(value: unknown): string | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  return normalizeOptionalString(record.displayName)
+    ?? normalizeOptionalString(record.emailAddress)
+    ?? normalizeOptionalString(record.name)
+    ?? normalizeOptionalString(record.key)
+    ?? normalizeOptionalString(record.accountId)
+    ?? normalizeOptionalString(record.id);
 }
 
 function getJiraUserQueryValue(user?: JiraUserReference): string | undefined {
@@ -355,10 +383,11 @@ function normalizeTaskFilters(value: unknown): JiraTaskFilters {
   }
 
   const record = value as Record<string, unknown>;
+  const author = normalizeJiraUserReference(record.author);
   const assignee = normalizeJiraUserReference(record.assignee);
   return {
     ...(typeof record.onlyActive === 'boolean' ? { onlyActive: record.onlyActive } : {}),
-    ...(normalizeOptionalString(record.author) ? { author: normalizeOptionalString(record.author) } : {}),
+    ...(author ? { author } : {}),
     ...(assignee ? { assignee } : {}),
     ...(normalizeFilterNumber(record.issueNumberGreaterThan) !== undefined
       ? { issueNumberGreaterThan: normalizeFilterNumber(record.issueNumberGreaterThan) }
@@ -379,6 +408,39 @@ function normalizePaperclipStatus(value: unknown): PaperclipIssueStatus | undefi
     || value === 'cancelled'
     ? value
     : undefined;
+}
+
+function normalizeJiraStatusMapping(value: unknown): JiraStatusMapping | null {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const jiraStatus = normalizeOptionalString(record.jiraStatus);
+  const paperclipStatus = normalizePaperclipStatus(record.paperclipStatus);
+  if (!jiraStatus || !paperclipStatus) {
+    return null;
+  }
+
+  return {
+    jiraStatus,
+    paperclipStatus,
+    ...(Object.prototype.hasOwnProperty.call(record, 'assigneeAgentId')
+      ? { assigneeAgentId: normalizeOptionalString(record.assigneeAgentId) ?? null }
+      : {})
+  };
+}
+
+function getDefaultStatusMappings(): JiraStatusMapping[] {
+  return DEFAULT_EXPLICIT_STATUS_MAPPINGS.map((entry) => ({ ...entry }));
+}
+
+function getEffectiveStatusMappings(projectConfig: JiraProjectSyncConfig | null): JiraStatusMapping[] {
+  if (!projectConfig?.statusMappings?.length) {
+    return getDefaultStatusMappings();
+  }
+
+  return projectConfig.statusMappings;
 }
 
 function normalizeProviderConfig(value: unknown, index: number): JiraProviderConfig | null {
@@ -472,6 +534,16 @@ function normalizeProjectConfig(value: unknown, index: number): JiraProjectSyncC
     ...(normalizeOptionalString(record.providerId) ? { providerId: normalizeOptionalString(record.providerId) } : {}),
     ...(normalizeJiraUserReference(record.defaultAssignee) ? { defaultAssignee: normalizeJiraUserReference(record.defaultAssignee) } : {}),
     ...(normalizePaperclipStatus(record.defaultStatus) ? { defaultStatus: normalizePaperclipStatus(record.defaultStatus) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(record, 'defaultStatusAssigneeAgentId')
+      ? { defaultStatusAssigneeAgentId: normalizeOptionalString(record.defaultStatusAssigneeAgentId) ?? null }
+      : {}),
+    ...(Array.isArray(record.statusMappings)
+      ? {
+          statusMappings: record.statusMappings
+            .map((entry) => normalizeJiraStatusMapping(entry))
+            .filter((entry): entry is JiraStatusMapping => entry !== null)
+        }
+      : {}),
     ...(normalizeFrequencyMinutes(record.scheduleFrequencyMinutes) !== null
       ? { scheduleFrequencyMinutes: normalizeFrequencyMinutes(record.scheduleFrequencyMinutes) ?? undefined }
       : {}),
@@ -560,7 +632,9 @@ function legacyMappingsToProjectConfigs(params: {
       ...(mapping.paperclipProjectId ? { projectId: mapping.paperclipProjectId } : {}),
       ...(mapping.providerId ? { providerId: mapping.providerId } : {}),
       ...(legacyCompanyFilters.assignee ? { defaultAssignee: legacyCompanyFilters.assignee } : {}),
-      defaultStatus: 'in_progress',
+      defaultStatus: DEFAULT_PAPERCLIP_STATUS,
+      defaultStatusAssigneeAgentId: null,
+      statusMappings: getDefaultStatusMappings(),
       ...(normalizeFrequencyMinutes(params.scheduleByCompanyId[companyId]) !== null
         ? { scheduleFrequencyMinutes: normalizeFrequencyMinutes(params.scheduleByCompanyId[companyId]) ?? undefined }
         : {}),
@@ -695,6 +769,27 @@ function getProjectConfig(
   )) ?? null;
 }
 
+function resolveMappedPaperclipState(
+  projectConfig: JiraProjectSyncConfig | null,
+  jiraStatusName: string
+): Partial<Pick<Issue, 'status' | 'assigneeAgentId'>> {
+  if (!projectConfig) {
+    return {};
+  }
+
+  const normalizedStatusName = normalizeStatusName(jiraStatusName);
+  const matchedMapping = getEffectiveStatusMappings(projectConfig).find((entry) => (
+    normalizeStatusName(entry.jiraStatus) === normalizedStatusName
+  ));
+
+  return {
+    status: matchedMapping?.paperclipStatus ?? projectConfig.defaultStatus ?? DEFAULT_PAPERCLIP_STATUS,
+    assigneeAgentId: matchedMapping
+      ? (matchedMapping.assigneeAgentId ?? null)
+      : (projectConfig.defaultStatusAssigneeAgentId ?? null)
+  };
+}
+
 async function getAvailableProviders(ctx: PluginSetupContext): Promise<JiraProviderConfig[]> {
   return getProvidersFromConfig(await ctx.config.get());
 }
@@ -721,7 +816,7 @@ async function findProjectById(
   }
 
   const projects = await ctx.projects.list({ companyId });
-  const project = projects.find((entry) => entry.id === projectId);
+  const project = projects.find((entry) => entry.id === projectId && !entry.archivedAt);
   return project ? { id: project.id, name: project.name } : null;
 }
 
@@ -730,7 +825,7 @@ async function resolvePaperclipProjectForMapping(
   companyId: string,
   mapping: JiraMapping
 ): Promise<{ id: string; name: string } | null> {
-  const projects = await ctx.projects.list({ companyId });
+  const projects = (await ctx.projects.list({ companyId })).filter((project) => !project.archivedAt);
 
   if (mapping.paperclipProjectId) {
     const matchedById = projects.find((project) => project.id === mapping.paperclipProjectId);
@@ -978,6 +1073,7 @@ async function getProviderDisplayConfig(
   return {
     providerId: normalizeOptionalString(config.id) ?? matchedProvider.id,
     providerName: normalizeOptionalString(config.name) ?? matchedProvider.name,
+    providerType: 'jira',
     ...(baseUrl ? { baseUrl } : {}),
     ...(userEmail ? { userEmail } : {}),
     defaultIssueType: normalizeOptionalString(config.defaultIssueType) ?? DEFAULT_ISSUE_TYPE,
@@ -1015,6 +1111,35 @@ function buildDisplayConfigSummary(config: JiraProviderDisplayConfig): { ready: 
     ready: false,
     message: `Set the Jira base URL and token for ${config.providerName}. jiraUserEmail is optional and is only needed for Jira environments that require Basic auth instead of Bearer token auth.`
   };
+}
+
+function buildProviderTypeOptions(): Array<{ value: 'jira'; label: string }> {
+  return [{
+    value: 'jira',
+    label: 'Jira'
+  }];
+}
+
+async function countImportedIssuesByProject(
+  ctx: PluginSetupContext,
+  companyId?: string
+): Promise<Record<string, number>> {
+  const issueLinks = await ctx.entities.list({
+    entityType: ISSUE_LINK_ENTITY_TYPE,
+    limit: 500
+  });
+  const counts: Record<string, number> = {};
+  for (const entry of issueLinks) {
+    const data = entry.data as Partial<JiraIssueLinkData>;
+    if (!data.projectId || data.source !== 'jira') {
+      continue;
+    }
+    if (companyId && data.companyId !== companyId) {
+      continue;
+    }
+    counts[data.projectId] = (counts[data.projectId] ?? 0) + 1;
+  }
+  return counts;
 }
 
 function encodeBasicAuth(userEmail: string, token: string): string {
@@ -1058,7 +1183,28 @@ async function normalizeJiraApiError(error: unknown): Promise<Error> {
       responseText = '';
     }
 
-    return new Error(`Jira request failed (${error.response.status}). ${responseText || error.response.statusText}`);
+    let detail = responseText || error.response.statusText;
+    try {
+      const parsed = responseText ? JSON.parse(responseText) as Record<string, unknown> : null;
+      if (parsed) {
+        const errorMessages = Array.isArray(parsed.errorMessages)
+          ? parsed.errorMessages.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+          : [];
+        const fieldErrors = parsed.errors && typeof parsed.errors === 'object'
+          ? Object.entries(parsed.errors as Record<string, unknown>)
+              .filter(([, value]) => typeof value === 'string' && value.trim().length > 0)
+              .map(([field, value]) => `${field}: ${String(value)}`)
+          : [];
+        const combined = [...errorMessages, ...fieldErrors].join(' ');
+        if (combined) {
+          detail = combined;
+        }
+      }
+    } catch {
+      // Keep the raw response text when Jira does not return JSON.
+    }
+
+    return new Error(`Jira request failed (${error.response.status}). ${detail}`);
   }
 
   if (error instanceof JiraFetchError) {
@@ -1078,7 +1224,13 @@ async function jiraApiCall<T>(
   try {
     return await run(getJiraApi(ctx, config));
   } catch (error) {
-    throw await normalizeJiraApiError(error);
+    const normalizedError = await normalizeJiraApiError(error);
+    ctx.logger.error('Jira API call failed.', {
+      providerId: config.providerId,
+      baseUrl: config.baseUrl,
+      message: normalizedError.message
+    });
+    throw normalizedError;
   }
 }
 
@@ -1175,7 +1327,10 @@ function buildJiraSearchJql(mapping: JiraMapping, filters?: JiraTaskFilters): st
     clauses.push('statusCategory != Done');
   }
   if (filters?.author) {
-    clauses.push(`reporter = "${escapeJqlValue(filters.author)}"`);
+    const authorValue = getJiraUserQueryValue(filters.author);
+    if (authorValue) {
+      clauses.push(`reporter = "${escapeJqlValue(authorValue)}"`);
+    }
   }
   if (filters?.assignee) {
     const assigneeValue = getJiraUserQueryValue(filters.assignee);
@@ -1223,6 +1378,12 @@ function normalizeJiraIssue(value: unknown, config: JiraConfig): JiraIssueRecord
   const assignee = fields.assignee && typeof fields.assignee === 'object'
     ? fields.assignee as Record<string, unknown>
     : {};
+  const creator = fields.creator && typeof fields.creator === 'object'
+    ? fields.creator as Record<string, unknown>
+    : {};
+  const reporter = fields.reporter && typeof fields.reporter === 'object'
+    ? fields.reporter as Record<string, unknown>
+    : {};
   const commentsValue = fields.comment && typeof fields.comment === 'object'
     ? fields.comment as Record<string, unknown>
     : {};
@@ -1231,6 +1392,8 @@ function normalizeJiraIssue(value: unknown, config: JiraConfig): JiraIssueRecord
         .map((entry) => normalizeJiraComment(entry))
         .filter((entry): entry is JiraCommentRecord => entry !== null)
     : [];
+  const assigneeDisplayName = getJiraPersonDisplayName(assignee);
+  const creatorDisplayName = getJiraPersonDisplayName(creator) ?? getJiraPersonDisplayName(reporter);
   const key = normalizeOptionalString(record.key);
   const id = normalizeOptionalString(record.id);
   const summary = normalizeOptionalString(fields.summary);
@@ -1244,7 +1407,8 @@ function normalizeJiraIssue(value: unknown, config: JiraConfig): JiraIssueRecord
     key,
     summary,
     description: adfToMarkdown(fields.description),
-    ...(normalizeOptionalString(assignee.displayName) ? { assigneeDisplayName: normalizeOptionalString(assignee.displayName) } : {}),
+    ...(assigneeDisplayName ? { assigneeDisplayName } : {}),
+    ...(creatorDisplayName ? { creatorDisplayName } : {}),
     statusName: normalizeOptionalString(status.name) ?? 'Unknown',
     statusCategory: normalizeOptionalString(statusCategory.name) ?? 'Unknown',
     updatedAt: normalizeOptionalString(fields.updated) ?? new Date().toISOString(),
@@ -1270,7 +1434,7 @@ function normalizeJiraComment(value: unknown): JiraCommentRecord | null {
   return {
     id,
     body: adfToMarkdown(record.body),
-    authorDisplayName: normalizeOptionalString(author.displayName) ?? 'Jira user',
+    authorDisplayName: getJiraPersonDisplayName(author) ?? 'Jira user',
     createdAt: normalizeOptionalString(record.created) ?? new Date().toISOString(),
     updatedAt: normalizeOptionalString(record.updated) ?? new Date().toISOString()
   };
@@ -1293,7 +1457,7 @@ async function searchJiraIssues(
         config,
         async (api) => await api.getIssue({
           issueIdOrKey: issueKey,
-          fields: 'summary,description,status,comment,updated,created,issuetype,assignee'
+          fields: 'summary,description,status,comment,updated,created,issuetype,assignee,creator,reporter'
         })
       );
       const issue = normalizeJiraIssue(response, config);
@@ -1312,7 +1476,7 @@ async function searchJiraIssues(
           requestBody: {
           jql: `issuekey = ${issueKey} ORDER BY updated DESC`,
           maxResults: 1,
-          fields: ['summary', 'description', 'status', 'comment', 'updated', 'created', 'issuetype', 'assignee']
+          fields: ['summary', 'description', 'status', 'comment', 'updated', 'created', 'issuetype', 'assignee', 'creator', 'reporter']
         }
       })
     );
@@ -1329,7 +1493,7 @@ async function searchJiraIssues(
       requestBody: {
         jql: buildJiraSearchJql(mapping, options?.filters),
         maxResults: 50,
-        fields: ['summary', 'description', 'status', 'comment', 'updated', 'created', 'issuetype', 'assignee']
+        fields: ['summary', 'description', 'status', 'comment', 'updated', 'created', 'issuetype', 'assignee', 'creator', 'reporter']
       }
     })
   );
@@ -1498,28 +1662,90 @@ async function transitionJiraIssue(
   );
 }
 
+async function setJiraIssueAssignee(
+  ctx: PluginSetupContext,
+  config: JiraConfig,
+  jiraIssueKey: string,
+  assignee: JiraUserReference
+): Promise<void> {
+  const attempts = [
+    {
+      requestBody: {
+        name: assignee.username ?? assignee.accountId
+      }
+    },
+    {
+      requestBody: {
+        accountId: assignee.accountId
+      }
+    },
+    {
+      requestBody: {
+        name: assignee.accountId
+      }
+    }
+  ];
+
+  let lastError: unknown;
+  for (const attempt of attempts) {
+    try {
+      await jiraApiCallAllowNoContent(
+        ctx,
+        config,
+        async (api) => {
+          await api.assignRaw({
+            issueIdOrKey: jiraIssueKey,
+            requestBody: attempt.requestBody
+          });
+        }
+      );
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('Failed to update the Jira assignee.');
+}
+
 async function addJiraComment(
   ctx: PluginSetupContext,
   config: JiraConfig,
   jiraIssueKey: string,
   body: string
 ): Promise<{ id: string }> {
-  const response = await jiraApiCall(
-    ctx,
-    config,
-    async (api) => await api.addComment({
-      issueIdOrKey: jiraIssueKey,
-      requestBody: {
-        body: plainTextToAdf(body)
+  const payloads = [
+    {
+      body
+    },
+    {
+      body: plainTextToAdf(body)
+    }
+  ];
+
+  let lastError: unknown;
+  for (const requestBody of payloads) {
+    try {
+      const response = await jiraApiCall(
+        ctx,
+        config,
+        async (api) => await api.addComment({
+          issueIdOrKey: jiraIssueKey,
+          requestBody
+        })
+      );
+      const id = normalizeOptionalString(response.id);
+      if (!id) {
+        throw new Error('Jira did not return the created comment id.');
       }
-    })
-  );
-  const id = normalizeOptionalString(response.id);
-  if (!id) {
-    throw new Error('Jira did not return the created comment id.');
+
+      return { id };
+    } catch (error) {
+      lastError = error;
+    }
   }
 
-  return { id };
+  throw lastError instanceof Error ? lastError : new Error('Failed to create the Jira comment.');
 }
 
 async function testJiraConnection(
@@ -1835,7 +2061,7 @@ async function findOrRecoverLinkedIssueEntity(
     return null;
   }
 
-  const [jiraIssue] = await searchJiraIssues(ctx, config, mapping, { issueKey: jiraIssueKey });
+        const [jiraIssue] = await searchJiraIssues(ctx, config, mapping, { issueKey: jiraIssueKey });
   if (!jiraIssue) {
     return null;
   }
@@ -1850,6 +2076,7 @@ async function findOrRecoverLinkedIssueEntity(
     jiraProjectKey: mapping.jiraProjectKey,
     jiraUrl: jiraIssue.url,
     ...(jiraIssue.assigneeDisplayName ? { jiraAssigneeDisplayName: jiraIssue.assigneeDisplayName } : {}),
+    ...(jiraIssue.creatorDisplayName ? { jiraCreatorDisplayName: jiraIssue.creatorDisplayName } : {}),
     jiraStatusName: jiraIssue.statusName,
     jiraStatusCategory: jiraIssue.statusCategory,
     linkedCommentCount: jiraIssue.comments.length,
@@ -2004,6 +2231,9 @@ async function importOrUpdateIssueFromJira(
   if (!resolvedProject) {
     return 'skipped';
   }
+  const settings = normalizeSettings(await ctx.state.get(SETTINGS_SCOPE));
+  const projectConfig = getProjectConfig(settings, companyId, resolvedProject.id, resolvedProject.name);
+  const mappedPaperclipState = resolveMappedPaperclipState(projectConfig, jiraIssue.statusName);
 
   const existingLink = await findLinkedIssueEntityByKey(ctx, jiraIssue.key, {
     companyId,
@@ -2024,7 +2254,8 @@ async function importOrUpdateIssueFromJira(
     await ctx.issues.update(
       createdIssue.id,
       {
-        description: importedDescription
+        description: importedDescription,
+        ...mappedPaperclipState
       },
       companyId
     );
@@ -2038,6 +2269,7 @@ async function importOrUpdateIssueFromJira(
       jiraProjectKey: mapping.jiraProjectKey,
       jiraUrl: jiraIssue.url,
       ...(jiraIssue.assigneeDisplayName ? { jiraAssigneeDisplayName: jiraIssue.assigneeDisplayName } : {}),
+      ...(jiraIssue.creatorDisplayName ? { jiraCreatorDisplayName: jiraIssue.creatorDisplayName } : {}),
       jiraStatusName: jiraIssue.statusName,
       jiraStatusCategory: jiraIssue.statusCategory,
       linkedCommentCount: jiraIssue.comments.length,
@@ -2061,7 +2293,8 @@ async function importOrUpdateIssueFromJira(
     {
       title: importedTitle,
       description: importedDescription,
-      hiddenAt: null
+      hiddenAt: null,
+      ...mappedPaperclipState
     } as Record<string, unknown>,
     companyId
   );
@@ -2073,6 +2306,7 @@ async function importOrUpdateIssueFromJira(
     jiraProjectKey: mapping.jiraProjectKey,
     jiraUrl: jiraIssue.url,
     ...(jiraIssue.assigneeDisplayName ? { jiraAssigneeDisplayName: jiraIssue.assigneeDisplayName } : {}),
+    ...(jiraIssue.creatorDisplayName ? { jiraCreatorDisplayName: jiraIssue.creatorDisplayName } : {}),
     jiraStatusName: jiraIssue.statusName,
     jiraStatusCategory: jiraIssue.statusCategory,
     linkedCommentCount: jiraIssue.comments.length,
@@ -2099,9 +2333,44 @@ async function syncMappings(
 ): Promise<SyncRunState> {
   const allMappings = getMappingsForCompany(settings, companyId);
   const scopedProject = options?.projectId ? await findProjectById(ctx, companyId, options.projectId) : null;
-  const mappings = options?.projectId
-    ? allMappings.filter((mapping) => mappingMatchesProject(mapping, scopedProject))
-    : allMappings;
+  const scopedProjectConfig =
+    options?.projectId
+      ? getProjectConfig(settings, companyId, options.projectId, scopedProject?.name)
+      : null;
+  if (options?.projectId && scopedProjectConfig && !scopedProjectConfig.providerId) {
+    return await saveSyncState(ctx, settings, companyId, {
+      status: 'error',
+      message: 'Select a provider before running sync for this project.',
+      checkedAt: new Date().toISOString(),
+      lastRunTrigger: options?.trigger ?? 'manual'
+    }, options.projectId).then((next) => getProjectSyncState(next, companyId, options.projectId));
+  }
+  const candidateMappings = scopedProjectConfig
+    ? scopedProjectConfig.mappings.map((mapping) => ({
+        id: mapping.id,
+        companyId,
+        providerId: scopedProjectConfig.providerId,
+        jiraProjectKey: mapping.jiraProjectKey,
+        ...(mapping.jiraJql ? { jiraJql: mapping.jiraJql } : {}),
+        paperclipProjectId: scopedProjectConfig.projectId,
+        paperclipProjectName: scopedProjectConfig.projectName,
+        ...(mapping.filters ? { filters: mapping.filters } : {})
+      }))
+    : options?.projectId
+      ? allMappings.filter((mapping) => mappingMatchesProject(mapping, scopedProject))
+      : allMappings;
+  const mappings: JiraMapping[] = [];
+  for (const mapping of candidateMappings) {
+    const resolvedProject = await resolvePaperclipProjectForMapping(ctx, companyId, mapping);
+    if (!resolvedProject) {
+      continue;
+    }
+    mappings.push({
+      ...mapping,
+      paperclipProjectId: resolvedProject.id,
+      paperclipProjectName: resolvedProject.name
+    });
+  }
   if (mappings.length === 0) {
     return await saveSyncState(ctx, settings, companyId, {
       status: 'error',
@@ -2229,6 +2498,7 @@ async function buildSettingsRegistrationData(
   const settings = normalizeSettings(await ctx.state.get(SETTINGS_SCOPE));
   const projects = companyId ? await ctx.projects.list({ companyId }) : [];
   const visibleProjects = projects.filter((project) => !project.archivedAt);
+  const importedCountsByProjectId = await countImportedIssuesByProject(ctx, companyId);
   const providers = await getAvailableProviders(ctx);
   const providerSummaries = await Promise.all(providers.map(async (provider) => {
     const config = await getProviderDisplayConfig(ctx, provider.id);
@@ -2265,26 +2535,41 @@ async function buildSettingsRegistrationData(
     paperclipProjectName: projectConfig.projectName,
     ...(mapping.filters ? { filters: mapping.filters } : {})
   })) ?? [];
+  const entrySurface = issueId ? 'issue' : selectedProject ? 'project' : 'global';
+  const requiresProjectSelection = !selectedProject;
+  const providerTypeOptions = buildProviderTypeOptions();
 
   return {
+    entryContext: {
+      surface: entrySurface,
+      projectId: selectedProject?.id ?? fallbackProjectId ?? null,
+      issueId: issueId ?? null,
+      projectName: selectedProject?.name ?? null,
+      requiresProjectSelection
+    },
+    currentPage: requiresProjectSelection ? 'projects' : 'project',
     selectedProjectId: selectedProject?.id ?? null,
     selectedProjectName: selectedProject?.name ?? null,
     mappings: selectedMappings,
     filters: selectedMappings[0]?.filters ?? {},
     providers: providerSummaries,
+    providerTypeOptions,
     selectedProviderId,
     selectedProviderKey: selectedProviderId ? 'jira' : null,
     connectionTest: getProjectConnectionTestState(settings, companyId, selectedProject?.id),
     syncState: getProjectSyncState(settings, companyId, selectedProject?.id),
     scheduleFrequencyMinutes: projectConfig?.scheduleFrequencyMinutes ?? getProjectScheduleFrequencyMinutes(settings, companyId, selectedProject?.id),
-    defaultAssignee: projectConfig?.defaultAssignee ?? '',
-    defaultStatus: projectConfig?.defaultStatus ?? 'in_progress',
+    defaultAssignee: projectConfig?.defaultAssignee ?? null,
+    defaultStatus: projectConfig?.defaultStatus ?? DEFAULT_PAPERCLIP_STATUS,
+    defaultStatusAssigneeAgentId: projectConfig?.defaultStatusAssigneeAgentId ?? null,
+    statusMappings: getEffectiveStatusMappings(projectConfig),
     availableProjects: visibleProjects.map((project) => ({
       id: project.id,
       name: project.name,
       providerId: getProjectConfig(settings, companyId ?? '', project.id, project.name)?.providerId ?? null,
       providerDisplayName: providerSummaries.find((provider) => provider.providerId === getProjectConfig(settings, companyId ?? '', project.id, project.name)?.providerId)?.displayName ?? null,
-      isConfigured: Boolean(getProjectConfig(settings, companyId ?? '', project.id, project.name)?.providerId)
+      isConfigured: Boolean(getProjectConfig(settings, companyId ?? '', project.id, project.name)?.providerId),
+      hasImportedIssues: (importedCountsByProjectId[project.id] ?? 0) > 0
     })),
     configReady: Boolean(projectConfig?.providerId) && (selectedProviderSummary?.ready ?? false),
     configMessage:
@@ -2298,12 +2583,39 @@ async function buildSettingsRegistrationData(
           projectId: selectedProject.id,
           projectName: selectedProject.name,
           providerId: projectConfig?.providerId ?? null,
-          defaultAssignee: projectConfig?.defaultAssignee ?? '',
-          defaultStatus: projectConfig?.defaultStatus ?? 'in_progress',
+          defaultAssignee: projectConfig?.defaultAssignee ?? null,
+          defaultStatus: projectConfig?.defaultStatus ?? DEFAULT_PAPERCLIP_STATUS,
+          defaultStatusAssigneeAgentId: projectConfig?.defaultStatusAssigneeAgentId ?? null,
+          statusMappings: getEffectiveStatusMappings(projectConfig),
           scheduleFrequencyMinutes: projectConfig?.scheduleFrequencyMinutes ?? DEFAULT_SYNC_FREQUENCY_MINUTES,
           mappings: selectedMappings
         }
       : null,
+    projectPage: selectedProject
+      ? {
+          projectId: selectedProject.id,
+          projectName: selectedProject.name,
+          selectedProviderId: projectConfig?.providerId ?? null,
+          showProviderSelection: true,
+          showHideImported: true,
+          showProjectSettings: Boolean(projectConfig?.providerId),
+          showSyncActions: Boolean(projectConfig?.providerId),
+          navigationContext: {
+            surface: entrySurface,
+            requiresProjectSelection
+          }
+        }
+      : null,
+    providerDirectory: {
+      providers: providerSummaries.map((provider) => ({
+        providerId: provider.providerId,
+        providerType: 'jira' as const,
+        displayName: provider.displayName,
+        configSummary: provider.configSummary,
+        tokenSaved: provider.tokenSaved
+      })),
+      availableProviderTypes: providerTypeOptions
+    },
     updatedAt: settings.updatedAt
   };
 }
@@ -2341,6 +2653,102 @@ async function buildSyncProvidersData(
         supportsConnectionTest: true
       };
     }))
+  };
+}
+
+async function buildSyncEntryContextData(
+  ctx: PluginSetupContext,
+  companyId?: string,
+  projectId?: string,
+  issueId?: string
+): Promise<Record<string, unknown>> {
+  const settingsData = await buildSettingsRegistrationData(ctx, companyId, projectId, issueId);
+  return settingsData.entryContext as Record<string, unknown>;
+}
+
+async function buildSyncProjectListData(
+  ctx: PluginSetupContext,
+  companyId?: string
+): Promise<Record<string, unknown>> {
+  const settingsData = await buildSettingsRegistrationData(ctx, companyId);
+  return {
+    projects: Array.isArray(settingsData.availableProjects)
+      ? settingsData.availableProjects.map((project) => {
+          const record = project as Record<string, unknown>;
+          return {
+            projectId: normalizeOptionalString(record.id) ?? '',
+            projectName: normalizeOptionalString(record.name) ?? '',
+            providerId: normalizeOptionalString(record.providerId) ?? null,
+            providerDisplayName: normalizeOptionalString(record.providerDisplayName) ?? null,
+            hasImportedIssues: record.hasImportedIssues === true,
+            isConfigured: record.isConfigured === true
+          };
+        })
+      : []
+  };
+}
+
+async function buildSyncProjectPageData(
+  ctx: PluginSetupContext,
+  companyId?: string,
+  projectId?: string,
+  issueId?: string
+): Promise<Record<string, unknown>> {
+  const settingsData = await buildSettingsRegistrationData(ctx, companyId, projectId, issueId);
+  const projectPage = settingsData.projectPage as Record<string, unknown> | null | undefined;
+  return {
+    ...(projectPage ?? {}),
+    availableProviders: settingsData.providers ?? [],
+    providerSummary: settingsData.providerConfig ?? null,
+    projectSettings: settingsData.projectConfig ?? null,
+    navigationContext: (settingsData.entryContext as Record<string, unknown> | undefined) ?? null,
+    selectedProviderId: settingsData.selectedProviderId ?? null,
+    showProviderSelection: Boolean(projectPage?.showProviderSelection ?? settingsData.selectedProjectId),
+    showHideImported: Boolean(projectPage?.showHideImported ?? settingsData.selectedProjectId),
+    showProjectSettings: Boolean(projectPage?.showProjectSettings),
+    showSyncActions: Boolean(projectPage?.showSyncActions),
+    mappings: settingsData.mappings ?? [],
+    syncProgress: settingsData.syncState ?? { status: 'idle' },
+    connectionTest: settingsData.connectionTest ?? { status: 'idle' }
+  };
+}
+
+async function buildProviderDirectoryData(
+  ctx: PluginSetupContext,
+  companyId?: string
+): Promise<Record<string, unknown>> {
+  const settingsData = await buildSettingsRegistrationData(ctx, companyId);
+  return settingsData.providerDirectory as Record<string, unknown>;
+}
+
+async function buildProviderDetailData(
+  ctx: PluginSetupContext,
+  companyId?: string,
+  providerId?: string
+): Promise<Record<string, unknown>> {
+  const providers = await getAvailableProviders(ctx);
+  const selectedProvider = providerId ? providers.find((provider) => provider.id === providerId) ?? null : null;
+  const config = selectedProvider ? await getProviderDisplayConfig(ctx, selectedProvider.id) : null;
+  return {
+    mode: selectedProvider ? 'edit' : 'create',
+    providerId: selectedProvider?.id ?? null,
+    providerType: selectedProvider?.type ?? 'jira',
+    fields: selectedProvider
+      ? {
+          name: selectedProvider.name,
+          jiraBaseUrl: selectedProvider.jiraBaseUrl ?? '',
+          jiraUserEmail: selectedProvider.jiraUserEmail ?? '',
+          defaultIssueType: selectedProvider.defaultIssueType ?? DEFAULT_ISSUE_TYPE
+        }
+      : {
+          name: '',
+          jiraBaseUrl: '',
+          jiraUserEmail: '',
+          defaultIssueType: DEFAULT_ISSUE_TYPE
+        },
+    tokenSaved: Boolean(config?.tokenSaved),
+    backTarget: companyId ? 'providers' : 'settings',
+    availableProviderTypes: buildProviderTypeOptions()
   };
 }
 
@@ -2394,6 +2802,42 @@ async function buildIssueJiraDetails(
   const mapping = await resolveMappingForIssue(ctx, settings, companyId, issueId);
   const rawLink = await findOrRecoverLinkedIssueEntity(ctx, settings, companyId, issueId);
   const link = shouldPresentIssueLink(issue, rawLink) ? rawLink : null;
+  let liveIssue: JiraIssueRecord | null = null;
+  if (link) {
+    try {
+      const config = await getResolvedConfig(ctx, link.providerId ?? mapping?.providerId);
+      if (isConfigReady(config)) {
+        const refreshMapping: JiraMapping = mapping ?? {
+          id: `live-${link.jiraIssueKey}`,
+          companyId,
+          providerId: link.providerId,
+          jiraProjectKey: link.jiraProjectKey,
+          paperclipProjectId: issue.projectId ?? undefined,
+          paperclipProjectName: projectConfig?.projectName ?? 'Linked project'
+        };
+        const [refreshedIssue] = await searchJiraIssues(ctx, config, refreshMapping, { issueKey: link.jiraIssueKey });
+        if (refreshedIssue) {
+          liveIssue = refreshedIssue;
+          const refreshedLink: JiraIssueLinkData = {
+            ...link,
+            jiraIssueId: refreshedIssue.id,
+            jiraIssueKey: refreshedIssue.key,
+            jiraProjectKey: link.jiraProjectKey,
+            jiraUrl: refreshedIssue.url,
+            ...(refreshedIssue.assigneeDisplayName ? { jiraAssigneeDisplayName: refreshedIssue.assigneeDisplayName } : {}),
+            ...(refreshedIssue.creatorDisplayName ? { jiraCreatorDisplayName: refreshedIssue.creatorDisplayName } : {}),
+            jiraStatusName: refreshedIssue.statusName,
+            jiraStatusCategory: refreshedIssue.statusCategory,
+            linkedCommentCount: refreshedIssue.comments.length,
+            lastSyncedAt: link.lastSyncedAt ?? new Date().toISOString()
+          };
+          await upsertIssueLinkEntity(ctx, issueId, refreshedLink);
+        }
+      }
+    } catch {
+      liveIssue = null;
+    }
+  }
   let availableTransitions: Array<{ id: string; name: string }> = [];
   if (link) {
     try {
@@ -2409,6 +2853,7 @@ async function buildIssueJiraDetails(
     isSynced: Boolean(link),
     linked: Boolean(link),
     providerKey: 'jira',
+    upstreamProviderId: link?.providerId ?? mapping?.providerId ?? null,
     issueId,
     localStatus: issue.status,
     syncTone: link ? 'synced' : 'local',
@@ -2429,20 +2874,28 @@ async function buildIssueJiraDetails(
       ? {
           upstream: {
             issueKey: link.jiraIssueKey,
-            jiraUrl: link.jiraUrl,
-            jiraAssigneeDisplayName: link.jiraAssigneeDisplayName,
-            jiraStatusName: link.jiraStatusName,
-            jiraStatusCategory: link.jiraStatusCategory,
+            jiraUrl: liveIssue?.url ?? link.jiraUrl,
+            jiraAssigneeDisplayName: liveIssue?.assigneeDisplayName ?? link.jiraAssigneeDisplayName,
+            jiraCreatorDisplayName: liveIssue?.creatorDisplayName ?? link.jiraCreatorDisplayName,
+            jiraStatusName: liveIssue?.statusName ?? link.jiraStatusName,
+            jiraStatusCategory: liveIssue?.statusCategory ?? link.jiraStatusCategory,
             lastSyncedAt: link.lastSyncedAt,
             lastPulledAt: link.lastPulledAt,
             lastPushedAt: link.lastPushedAt,
             source: link.source
           },
           upstreamStatus: {
-            name: link.jiraStatusName,
-            category: link.jiraStatusCategory
+            name: liveIssue?.statusName ?? link.jiraStatusName,
+            category: liveIssue?.statusCategory ?? link.jiraStatusCategory
           },
-          upstreamTransitions: availableTransitions
+          upstreamTransitions: availableTransitions,
+          upstreamComments: (liveIssue?.comments ?? []).map((comment) => ({
+            id: comment.id,
+            body: comment.body,
+            authorDisplayName: comment.authorDisplayName,
+            createdAt: comment.createdAt,
+            updatedAt: comment.updatedAt
+          }))
         }
       : {})
   };
@@ -2472,6 +2925,18 @@ async function buildCommentAnnotationData(
     direction: commentLink?.direction ?? null,
     origin,
     providerKey: 'jira',
+    styleTone:
+      origin === 'provider_pull'
+        ? 'synced'
+        : origin === 'provider_push'
+          ? 'info'
+          : 'local',
+    badgeLabel:
+      origin === 'provider_pull'
+        ? 'Imported'
+        : origin === 'provider_push'
+          ? 'Published upstream'
+          : 'Local only',
     isEditable: true,
     uploadAvailable: !commentLink,
     jiraIssueKey: link.jiraIssueKey,
@@ -2485,6 +2950,37 @@ async function buildCommentAnnotationData(
           ? `Uploaded to Jira issue ${link.jiraIssueKey}.`
           : `Local Paperclip comment on Jira issue ${link.jiraIssueKey}.`
   };
+}
+
+async function submitIssueComment(
+  ctx: PluginSetupContext,
+  companyId: string,
+  issueId: string,
+  body: string
+): Promise<Record<string, unknown>> {
+  const trimmedBody = body.trim();
+  if (!trimmedBody) {
+    throw new Error('Comment body is required.');
+  }
+
+  const createdComment = await ctx.issues.createComment(issueId, trimmedBody, companyId);
+
+  try {
+    const pushResult = await pushCommentToJira(ctx, companyId, issueId, createdComment.id);
+    return {
+      ok: true,
+      commentId: createdComment.id,
+      publishedUpstream: true,
+      upstreamCommentId: pushResult.upstreamCommentId ?? null,
+      message: 'Created Paperclip comment and published it to Jira.'
+    };
+  } catch (error) {
+    throw new Error(
+      error instanceof Error
+        ? `Created the comment in Paperclip, but Jira publishing failed: ${error.message}`
+        : 'Created the comment in Paperclip, but Jira publishing failed.'
+    );
+  }
 }
 
 function shouldRunScheduledSync(syncState: SyncRunState, scheduleFrequencyMinutes: number): boolean {
@@ -2554,6 +3050,7 @@ async function pushIssueToJira(
     jiraProjectKey: mapping.jiraProjectKey,
     jiraUrl: jiraIssue.url,
     ...(jiraIssue.assigneeDisplayName ? { jiraAssigneeDisplayName: jiraIssue.assigneeDisplayName } : {}),
+    ...(jiraIssue.creatorDisplayName ? { jiraCreatorDisplayName: jiraIssue.creatorDisplayName } : {}),
     jiraStatusName: jiraIssue.statusName,
     jiraStatusCategory: jiraIssue.statusCategory,
     linkedCommentCount: jiraIssue.comments.length,
@@ -2691,10 +3188,17 @@ async function setUpstreamIssueStatus(
     throw new Error(`Jira issue ${link.jiraIssueKey} could not be reloaded after the status change.`);
   }
 
+  const projectConfig = await resolveProjectConfigForIssue(ctx, settings, companyId, issueId);
+  const mappedPaperclipState = resolveMappedPaperclipState(projectConfig, reloadedIssue.statusName);
+  if (mappedPaperclipState.status || Object.prototype.hasOwnProperty.call(mappedPaperclipState, 'assigneeAgentId')) {
+    await ctx.issues.update(issueId, mappedPaperclipState, companyId);
+  }
+
   await upsertIssueLinkEntity(ctx, issueId, {
     ...link,
     providerId: config.providerId,
     ...(reloadedIssue.assigneeDisplayName ? { jiraAssigneeDisplayName: reloadedIssue.assigneeDisplayName } : {}),
+    ...(reloadedIssue.creatorDisplayName ? { jiraCreatorDisplayName: reloadedIssue.creatorDisplayName } : {}),
     jiraStatusName: reloadedIssue.statusName,
     jiraStatusCategory: reloadedIssue.statusCategory,
     lastSyncedAt: new Date().toISOString(),
@@ -2704,6 +3208,63 @@ async function setUpstreamIssueStatus(
   return {
     ok: true,
     message: `Updated Jira status to ${reloadedIssue.statusName}.`
+  };
+}
+
+async function setUpstreamIssueAssignee(
+  ctx: PluginSetupContext,
+  companyId: string,
+  issueId: string,
+  assignee: JiraUserReference
+): Promise<Record<string, unknown>> {
+  const settings = normalizeSettings(await ctx.state.get(SETTINGS_SCOPE));
+  const link = await findOrRecoverLinkedIssueEntity(ctx, settings, companyId, issueId);
+  if (!link) {
+    throw new Error('This Paperclip issue is not linked to Jira yet.');
+  }
+
+  const mapping = await resolveMappingForIssue(ctx, settings, companyId, issueId);
+  const config = await getResolvedConfig(ctx, link.providerId ?? mapping?.providerId);
+  if (!isConfigReady(config)) {
+    throw new Error(buildConfigSummary(config).message);
+  }
+
+  await setJiraIssueAssignee(ctx, config, link.jiraIssueKey, assignee);
+  const [reloadedIssue] = await searchJiraIssues(ctx, config, {
+    id: mapping?.id ?? 'reload',
+    companyId,
+    providerId: link.providerId ?? mapping?.providerId,
+    jiraProjectKey: link.jiraProjectKey,
+    jiraJql: mapping?.jiraJql,
+    paperclipProjectId: mapping?.paperclipProjectId,
+    paperclipProjectName: mapping?.paperclipProjectName ?? '',
+    filters: mapping?.filters
+  }, { issueKey: link.jiraIssueKey });
+
+  if (!reloadedIssue) {
+    throw new Error(`Jira issue ${link.jiraIssueKey} could not be reloaded after the assignee change.`);
+  }
+
+  const projectConfig = await resolveProjectConfigForIssue(ctx, settings, companyId, issueId);
+  const mappedPaperclipState = resolveMappedPaperclipState(projectConfig, reloadedIssue.statusName);
+  if (mappedPaperclipState.status || Object.prototype.hasOwnProperty.call(mappedPaperclipState, 'assigneeAgentId')) {
+    await ctx.issues.update(issueId, mappedPaperclipState, companyId);
+  }
+
+  await upsertIssueLinkEntity(ctx, issueId, {
+    ...link,
+    providerId: config.providerId,
+    ...(reloadedIssue.assigneeDisplayName ? { jiraAssigneeDisplayName: reloadedIssue.assigneeDisplayName } : {}),
+    ...(reloadedIssue.creatorDisplayName ? { jiraCreatorDisplayName: reloadedIssue.creatorDisplayName } : {}),
+    jiraStatusName: reloadedIssue.statusName,
+    jiraStatusCategory: reloadedIssue.statusCategory,
+    lastSyncedAt: new Date().toISOString(),
+    lastPushedAt: new Date().toISOString()
+  });
+
+  return {
+    ok: true,
+    message: `Updated Jira assignee to ${reloadedIssue.assigneeDisplayName ?? assignee.displayName}.`
   };
 }
 
@@ -2765,6 +3326,8 @@ async function persistProjectRegistration(
     providerId?: string;
     defaultAssignee?: JiraUserReference;
     defaultStatus?: PaperclipIssueStatus;
+    defaultStatusAssigneeAgentId?: string | null;
+    statusMappings?: JiraStatusMapping[];
     mappings: Array<JiraMapping | Record<string, unknown>>;
   };
   const companyId = normalizeCompanyId(record.companyId);
@@ -2778,7 +3341,15 @@ async function persistProjectRegistration(
   const explicitProjectName = normalizeOptionalString(record.projectName);
   const explicitProviderId = normalizeOptionalString(record.providerId);
   const explicitDefaultAssignee = normalizeJiraUserReference(record.defaultAssignee);
-  const explicitDefaultStatus = normalizePaperclipStatus(record.defaultStatus) ?? 'in_progress';
+  const explicitDefaultStatus = normalizePaperclipStatus(record.defaultStatus) ?? DEFAULT_PAPERCLIP_STATUS;
+  const explicitDefaultStatusAssigneeAgentId = Object.prototype.hasOwnProperty.call(record, 'defaultStatusAssigneeAgentId')
+    ? (normalizeOptionalString(record.defaultStatusAssigneeAgentId) ?? null)
+    : undefined;
+  const explicitStatusMappings = Array.isArray(record.statusMappings)
+    ? record.statusMappings
+        .map((entry) => normalizeJiraStatusMapping(entry))
+        .filter((entry): entry is JiraStatusMapping => entry !== null)
+    : [];
   const scheduleFrequencyMinutes = normalizeFrequencyMinutes(record.scheduleFrequencyMinutes) ?? DEFAULT_SYNC_FREQUENCY_MINUTES;
   const shouldResolveProviderIdentity = Boolean(explicitProjectId || explicitProjectName);
   const legacyFallbackProviderId = shouldResolveProviderIdentity
@@ -2792,6 +3363,8 @@ async function persistProjectRegistration(
         providerId: explicitProviderId,
         defaultAssignee: explicitDefaultAssignee,
         defaultStatus: explicitDefaultStatus,
+        defaultStatusAssigneeAgentId: explicitDefaultStatusAssigneeAgentId,
+        statusMappings: explicitStatusMappings,
         mappings
       }]
     : Array.from(mappings.reduce((accumulator, entry) => {
@@ -2808,7 +3381,9 @@ async function persistProjectRegistration(
           projectName: normalized.paperclipProjectName,
           providerId: normalized.providerId ?? legacyFallbackProviderId,
           defaultAssignee: normalized.filters?.assignee,
-          defaultStatus: 'in_progress' as PaperclipIssueStatus,
+          defaultStatus: DEFAULT_PAPERCLIP_STATUS,
+          defaultStatusAssigneeAgentId: null as string | null,
+          statusMappings: getDefaultStatusMappings(),
           mappings: [] as JiraMapping[]
         };
         current.mappings.push(normalized);
@@ -2820,6 +3395,7 @@ async function persistProjectRegistration(
         providerId?: string;
         defaultAssignee?: string;
         defaultStatus: PaperclipIssueStatus;
+        defaultStatusAssigneeAgentId: string | null;
         mappings: JiraMapping[];
       }>()).values()) as GroupedProjectInput[];
 
@@ -2841,7 +3417,12 @@ async function persistProjectRegistration(
       ...(groupedInput.projectId ? { projectId: groupedInput.projectId } : {}),
       ...(groupedInput.providerId ? { providerId: groupedInput.providerId } : {}),
       ...(resolvedDefaultAssignee ? { defaultAssignee: resolvedDefaultAssignee } : {}),
-      defaultStatus: groupedInput.defaultStatus ?? existing?.defaultStatus ?? 'in_progress',
+      defaultStatus: groupedInput.defaultStatus ?? existing?.defaultStatus ?? DEFAULT_PAPERCLIP_STATUS,
+      defaultStatusAssigneeAgentId:
+        groupedInput.defaultStatusAssigneeAgentId !== undefined
+          ? groupedInput.defaultStatusAssigneeAgentId
+          : (existing?.defaultStatusAssigneeAgentId ?? null),
+      statusMappings: groupedInput.statusMappings ?? existing?.statusMappings ?? getDefaultStatusMappings(),
       scheduleFrequencyMinutes,
       mappings: groupedInput.mappings.map((entry, mappingIndex) => ({
         id: normalizeOptionalString((entry as Record<string, unknown>).id) ?? `mapping-${mappingIndex + 1}`,
@@ -2861,22 +3442,53 @@ async function persistProjectRegistration(
 
 const plugin = definePlugin({
   async setup(ctx) {
-    ctx.launchers.register(GLOBAL_SYNC_LAUNCHER);
     ctx.launchers.register(ENTITY_SYNC_LAUNCHER);
+
+    ctx.data.register('sync.entryContext', async (input) => {
+      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const companyId = normalizeCompanyId(record.companyId);
+      const projectId = normalizeOptionalString(record.projectId);
+      const issueId = normalizeOptionalString(record.issueId);
+      return await buildSyncEntryContextData(ctx, companyId, projectId, issueId);
+    });
 
     ctx.data.register('sync.projects', async (input) => {
       const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
       const companyId = normalizeCompanyId(record.companyId);
-      const settingsData = await buildSettingsRegistrationData(ctx, companyId);
-      return {
-        projects: settingsData.availableProjects ?? []
-      };
+      return await buildSyncProjectListData(ctx, companyId);
+    });
+
+    ctx.data.register('sync.projectList', async (input) => {
+      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const companyId = normalizeCompanyId(record.companyId);
+      return await buildSyncProjectListData(ctx, companyId);
+    });
+
+    ctx.data.register('sync.projectPage', async (input) => {
+      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const companyId = normalizeCompanyId(record.companyId);
+      const projectId = normalizeOptionalString(record.projectId);
+      const issueId = normalizeOptionalString(record.issueId);
+      return await buildSyncProjectPageData(ctx, companyId, projectId, issueId);
     });
 
     ctx.data.register('sync.providers', async (input) => {
       const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
       const companyId = normalizeCompanyId(record.companyId);
       return await buildSyncProvidersData(ctx, companyId);
+    });
+
+    ctx.data.register('settings.providerDirectory', async (input) => {
+      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const companyId = normalizeCompanyId(record.companyId);
+      return await buildProviderDirectoryData(ctx, companyId);
+    });
+
+    ctx.data.register('settings.providerDetail', async (input) => {
+      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const companyId = normalizeCompanyId(record.companyId);
+      const providerId = normalizeOptionalString(record.providerId);
+      return await buildProviderDetailData(ctx, companyId, providerId);
     });
 
     ctx.data.register('sync.users.search', async (input) => {
@@ -2999,18 +3611,56 @@ const plugin = definePlugin({
       return await buildCommentAnnotationData(ctx, companyId, issueId, commentId);
     });
 
+    ctx.data.register('sync.assignableAgents', async (input) => {
+      const record = normalizeInputRecord(input);
+      const companyId = normalizeCompanyId(record.companyId);
+      if (!companyId) {
+        return { agents: [] };
+      }
+
+      const agents = await ctx.agents.list({
+        companyId,
+        limit: 200
+      });
+
+      return {
+        agents: agents
+          .filter((agent) => agent.status !== 'terminated')
+          .sort((left, right) => left.name.localeCompare(right.name))
+          .map((agent) => ({
+            id: agent.id,
+            name: agent.name,
+            title: agent.title,
+            status: agent.status
+          }))
+      };
+    });
+
     ctx.actions.register('settings.saveRegistration', async (input) => {
-      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const record = normalizeInputRecord(input);
       return await persistProjectRegistration(ctx, record);
     });
 
     ctx.actions.register('sync.project.save', async (input) => {
-      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const record = normalizeInputRecord(input);
       return await persistProjectRegistration(ctx, record);
     });
 
+    ctx.actions.register('sync.project.select', async (input) => {
+      const record = normalizeInputRecord(input);
+      const projectId = normalizeOptionalString(record.projectId);
+      if (!projectId) {
+        throw new Error('projectId is required.');
+      }
+
+      return {
+        projectId,
+        navigationTarget: `project:${projectId}`
+      };
+    });
+
     ctx.actions.register('sync.project.refreshIdentity', async (input) => {
-      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const record = normalizeInputRecord(input);
       const companyId = normalizeCompanyId(record.companyId);
       const projectId = normalizeOptionalString(record.projectId);
       const providerId = normalizeOptionalString(record.providerId);
@@ -3035,7 +3685,9 @@ const plugin = definePlugin({
         projectName: project.name,
         providerId,
         ...(defaultAssignee ? { defaultAssignee } : {}),
-        defaultStatus: existing?.defaultStatus ?? 'in_progress',
+        defaultStatus: existing?.defaultStatus ?? DEFAULT_PAPERCLIP_STATUS,
+        defaultStatusAssigneeAgentId: existing?.defaultStatusAssigneeAgentId ?? null,
+        statusMappings: existing?.statusMappings ?? getDefaultStatusMappings(),
         scheduleFrequencyMinutes: existing?.scheduleFrequencyMinutes ?? DEFAULT_SYNC_FREQUENCY_MINUTES,
         mappings: existing?.mappings ?? [],
         syncState: existing?.syncState,
@@ -3053,7 +3705,7 @@ const plugin = definePlugin({
     });
 
     ctx.actions.register('sync.provider.saveConfig', async (input) => {
-      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const record = normalizeInputRecord(input);
       const companyId = normalizeCompanyId(record.companyId);
       const providerKey = normalizeOptionalString(record.providerKey);
       const providerId = normalizeOptionalString(record.providerId);
@@ -3079,7 +3731,7 @@ const plugin = definePlugin({
     });
 
     ctx.actions.register('sync.provider.testConnection', async (input) => {
-      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const record = normalizeInputRecord(input);
       const companyId = normalizeCompanyId(record.companyId);
       const providerKey = normalizeOptionalString(record.providerKey);
       const providerId = normalizeOptionalString(record.providerId);
@@ -3114,7 +3766,7 @@ const plugin = definePlugin({
     });
 
     ctx.actions.register('sync.testConnection', async (input) => {
-      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const record = normalizeInputRecord(input);
       const companyId = normalizeCompanyId(record.companyId);
       const providerKey = normalizeOptionalString(record.providerKey);
       const providerId = normalizeOptionalString(record.providerId);
@@ -3149,7 +3801,7 @@ const plugin = definePlugin({
     });
 
     ctx.actions.register('sync.runNow', async (input) => {
-      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const record = normalizeInputRecord(input);
       const companyId = normalizeCompanyId(record.companyId);
       if (!companyId) {
         throw new Error('A company id is required to run Jira sync.');
@@ -3169,8 +3821,20 @@ const plugin = definePlugin({
       });
     });
 
+    ctx.actions.register('issue.setUpstreamAssignee', async (input) => {
+      const record = normalizeInputRecord(input);
+      const companyId = normalizeCompanyId(record.companyId);
+      const issueId = normalizeOptionalString(record.issueId);
+      const assignee = normalizeJiraUserReference(record.assignee);
+      if (!companyId || !issueId || !assignee) {
+        throw new Error('companyId, issueId, and assignee are required.');
+      }
+
+      return await setUpstreamIssueAssignee(ctx, companyId, issueId, assignee);
+    });
+
     ctx.actions.register('sync.findCleanupCandidates', async (input) => {
-      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const record = normalizeInputRecord(input);
       const companyId = normalizeCompanyId(record.companyId);
       const projectId = normalizeOptionalString(record.projectId);
       if (!companyId) {
@@ -3189,7 +3853,7 @@ const plugin = definePlugin({
     });
 
     ctx.actions.register('issue.pushToJira', async (input) => {
-      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const record = normalizeInputRecord(input);
       const companyId = normalizeCompanyId(record.companyId);
       const issueId = normalizeOptionalString(record.issueId);
       if (!companyId || !issueId) {
@@ -3200,7 +3864,7 @@ const plugin = definePlugin({
     });
 
     ctx.actions.register('issue.pullFromJira', async (input) => {
-      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const record = normalizeInputRecord(input);
       const companyId = normalizeCompanyId(record.companyId);
       const issueId = normalizeOptionalString(record.issueId);
       if (!companyId || !issueId) {
@@ -3211,7 +3875,7 @@ const plugin = definePlugin({
     });
 
     ctx.actions.register('issue.setUpstreamStatus', async (input) => {
-      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const record = normalizeInputRecord(input);
       const companyId = normalizeCompanyId(record.companyId);
       const issueId = normalizeOptionalString(record.issueId);
       const transitionId = normalizeOptionalString(record.transitionId);
@@ -3223,7 +3887,7 @@ const plugin = definePlugin({
     });
 
     ctx.actions.register('comment.pushToJira', async (input) => {
-      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const record = normalizeInputRecord(input);
       const companyId = normalizeCompanyId(record.companyId);
       const issueId = normalizeOptionalString(record.issueId);
       const commentId = normalizeOptionalString(record.commentId);
@@ -3235,7 +3899,7 @@ const plugin = definePlugin({
     });
 
     ctx.actions.register('comment.uploadToProvider', async (input) => {
-      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const record = normalizeInputRecord(input);
       const companyId = normalizeCompanyId(record.companyId);
       const issueId = normalizeOptionalString(record.issueId);
       const commentId = normalizeOptionalString(record.commentId);
@@ -3246,6 +3910,18 @@ const plugin = definePlugin({
       return await pushCommentToJira(ctx, companyId, issueId, commentId);
     });
 
+    ctx.actions.register('issue.comment.submit', async (input) => {
+      const record = normalizeInputRecord(input);
+      const companyId = normalizeCompanyId(record.companyId);
+      const issueId = normalizeOptionalString(record.issueId);
+      const body = typeof record.body === 'string' ? record.body : '';
+      if (!companyId || !issueId) {
+        throw new Error('companyId and issueId are required.');
+      }
+
+      return await submitIssueComment(ctx, companyId, issueId, body);
+    });
+
     ctx.jobs.register('sync.jira-issues', async (job) => {
       const settings = normalizeSettings(await ctx.state.get(SETTINGS_SCOPE));
       const projectConfigs = settings.projectConfigs ?? [];
@@ -3253,6 +3929,10 @@ const plugin = definePlugin({
         const syncState = getProjectSyncState(settings, projectConfig.companyId, projectConfig.projectId);
         const scheduleFrequencyMinutes = getProjectScheduleFrequencyMinutes(settings, projectConfig.companyId, projectConfig.projectId);
         if (!projectConfig.projectId || !shouldRunScheduledSync(syncState, scheduleFrequencyMinutes)) {
+          continue;
+        }
+        const activeProject = await findProjectById(ctx, projectConfig.companyId, projectConfig.projectId);
+        if (!activeProject) {
           continue;
         }
         await syncMappings(ctx, settings, projectConfig.companyId, {

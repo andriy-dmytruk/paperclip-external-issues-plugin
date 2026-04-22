@@ -4,10 +4,23 @@ const PLUGIN_ID = 'paperclip-jira-plugin';
 
 export const DEFAULT_JIRA_ISSUE_TYPE = 'Task';
 export const JIRA_ISSUE_TYPE_OPTIONS = ['Task', 'Bug', 'Story', 'Epic', 'Sub-task'] as const;
+export const PROVIDER_TYPE_OPTIONS = ['jira'] as const;
+export type ProviderType = (typeof PROVIDER_TYPE_OPTIONS)[number];
+export const PROVIDER_TYPE_LABELS: Record<ProviderType, string> = {
+  jira: 'Jira'
+};
+
+export interface ProviderDirectoryEntry {
+  providerId: string;
+  providerType: ProviderType;
+  displayName: string;
+  configSummary?: string;
+  tokenSaved?: boolean;
+}
 
 export interface JiraProviderConfig {
   id: string;
-  type: 'jira';
+  type: ProviderType;
   name: string;
   jiraBaseUrl?: string;
   jiraUserEmail?: string;
@@ -100,4 +113,12 @@ export function usePluginConfig() {
     error,
     save
   };
+}
+
+export function getProviderTypeLabel(type: ProviderType | string | undefined): string {
+  if (type === 'jira') {
+    return PROVIDER_TYPE_LABELS.jira;
+  }
+
+  return 'Unknown provider';
 }

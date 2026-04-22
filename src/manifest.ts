@@ -31,6 +31,7 @@ export const manifest: PaperclipPluginManifestV1 = {
     'issues.read',
     'issues.create',
     'issues.update',
+    'agents.read',
     'issue.comments.read',
     'issue.comments.create',
     'jobs.schedule',
@@ -123,23 +124,10 @@ export const manifest: PaperclipPluginManifestV1 = {
     ],
     launchers: [
       {
-        id: 'paperclip-jira-plugin-global-launcher',
-        displayName: 'Sync Issues',
-        placementZone: 'globalToolbarButton',
-        action: {
-          type: 'openModal',
-          target: 'JiraSyncLauncherModal'
-        },
-        render: {
-          environment: 'hostOverlay',
-          bounds: 'wide'
-        }
-      },
-      {
         id: 'paperclip-jira-plugin-entity-launcher',
         displayName: 'Sync Issues',
         placementZone: 'toolbarButton',
-        entityTypes: ['project', 'issue'],
+        entityTypes: ['project'],
         action: {
           type: 'openModal',
           target: 'JiraSyncLauncherModal'

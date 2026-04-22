@@ -6,27 +6,37 @@ Jira Sync is a Paperclip plugin for synchronizing Jira issues into Paperclip pro
 
 - The plugin MUST register successfully in Paperclip.
 - The plugin MUST expose a settings page, dashboard widget, task detail contribution, comment annotation contribution, and toolbar actions.
-- The settings page MUST expose a provider-aware Jira sync center that can save reusable Jira provider definitions separately from Paperclip project-scoped Jira sync settings.
+- The settings page MUST expose a provider-aware Jira settings surface that saves reusable Jira provider definitions separately from Paperclip project-scoped Jira sync settings.
+- Project-scoped sync MUST open a dedicated sync page for one Paperclip project at a time from project or issue sync surfaces instead of the global settings page.
 - The worker MUST read Jira connection details from plugin config using saved provider records. Legacy single-provider fields (`jiraBaseUrl`, `jiraUserEmail`, `jiraToken`, `jiraTokenRef`, `defaultIssueType`) SHOULD continue to work as a migration path.
 - The worker MUST NOT persist the raw Jira token in plugin state.
-- The sync center MUST support an explicit Jira connection test, MUST keep an existing token hidden in the UI, and MUST allow creating a provider from a dedicated popup launched next to the provider selector.
+- The sync center MUST support an explicit Jira connection test, MUST keep an existing token hidden in the UI, and MUST allow creating or editing a provider on its own dedicated page with `Back` navigation instead of a nested popup.
 - The sync center MUST let a Paperclip project explicitly choose `Provider: None` without falling back to the first saved Jira provider.
+- Before a provider is selected for a project, the sync center MUST hide provider-specific project settings and sync actions while keeping `Hide imported issues` available.
 - The sync flow MUST import Jira issues into the selected Paperclip project's configured Jira mappings.
 - Imported issues MUST retain the original Jira key as hidden durable metadata in the Paperclip issue description.
 - Synced issues MUST use a stable upstream-key title prefix fallback such as `[GRB-123]` so synced/local state stays visible even without host row styling.
 - The worker MUST persist durable plugin-owned link metadata for synced issues and synced comments.
-- The worker MUST treat Jira upstream status and Paperclip local status as separate fields; pull/import flows MUST update Jira status metadata without overwriting the Paperclip issue workflow status.
+- The worker MUST treat Jira upstream status and Paperclip local status as separate fields; Jira status metadata MUST remain visible even when Paperclip status differs.
 - The issue detail contribution MUST only present an issue as Jira-linked when the current Paperclip issue still carries the Jira sync markers for that upstream issue.
 - Jira-linked Paperclip issues MUST expose separate pull and push actions plus a visible `Open in Jira` action from the issue detail contribution.
 - Pure Paperclip issues in configured projects MUST expose a push action that creates the upstream Jira issue.
-- Comments on Jira-linked issues MUST expose comment-level sync presentation that distinguishes fetched Jira comments from local Paperclip comments and allows uploading an existing local comment.
+- Jira-linked issue controls SHOULD match Paperclip dark-mode styling and avoid bright opaque button fills when the host uses transparent actions.
+- Issue and sync action buttons SHOULD use Paperclip-aligned neutral styling with icon-first labels instead of bright filled call-to-action colors.
+- Comments on Jira-linked issues MUST expose comment-level sync presentation that distinguishes imported Jira comments, upstream-published comments, and local Paperclip comments.
+- Synced issue detail MUST include a collapsed Jira comments view above the composer so users can review upstream discussion without leaving Paperclip.
+- Synced issue detail MUST include a comment composer that always publishes new comments to Jira for linked issues.
 - The dashboard widget MUST summarize configured project mappings, linked issue count, and last sync state.
 - Manual sync MUST report processed, total, imported, updated, skipped, and failed counts when available.
-- Jira sync settings MUST be saved per Paperclip project, including selected provider, default assignee, default upload status, scheduled cadence, and that project's Jira mappings.
+- Jira sync settings MUST be saved per Paperclip project, including selected provider, default assignee, default Jira-to-Paperclip status mapping, scheduled cadence, and that project's Jira mappings.
+- Project sync settings MUST support explicit Jira-to-Paperclip status mappings so Jira status changes can update the local Paperclip workflow status when configured.
+- Jira-to-Paperclip status mappings SHOULD allow each mapped Jira status, including the default fallback row, to choose a Paperclip agent assignment or `None`.
 - Provider-specific project settings MUST remain preserved in state when a project switches to `Provider: None` so they can return if a real provider is selected again later.
 - Sync mappings MUST carry their own upstream issue filters so teams can tune each configured Paperclip project independently.
-- Project default assignee and mapping assignee filters MUST use structured Jira user references keyed by durable Jira identity, not plain display text.
-- The worker MUST expose Jira current-user resolution and Jira user search so the hosted UI can drive assignee autocomplete.
+- Project default assignee and mapping author/assignee filters MUST use structured Jira user references keyed by durable Jira identity, not plain display text.
+- The worker MUST expose Jira current-user resolution and Jira user search so the hosted UI can drive project-default and mapping-user autocomplete.
+- Jira-linked issue detail SHOULD surface both the upstream Jira assignee and the upstream Jira creator.
+- Jira-linked issue detail SHOULD refresh live Jira assignee, creator, status, and comments when the detail view loads so the UI does not depend only on stale cached link metadata.
 - The primary `Sync issues` action MUST save provider and project sync edits before running sync.
 - The settings surface SHOULD expose a `Hide imported issues` action that hides untouched imported Jira issues in Paperclip, regardless of whether their mapping is still configured.
 - The hide dialog SHOULD still open when there are zero matching imported issues so the empty state remains visible.
