@@ -1614,6 +1614,139 @@ test('sync.runNow maps closed GitHub issues to done by default', async () => {
   }
 });
 
+test('sync.projectPage exposes the bound GitHub repository as the suggested GitHub mapping', async () => {
+  const harness = createTestHarness({
+    manifest
+  });
+  await plugin.definition.setup(harness.ctx);
+
+  harness.seed({
+    projects: [
+      makeProject({
+        primaryWorkspace: {
+          id: 'workspace-1',
+          repoUrl: 'https://github.com/owner/repo',
+          sourceType: 'github',
+          isPrimary: true
+        },
+        workspaces: [
+          {
+            id: 'workspace-1',
+            repoUrl: 'https://github.com/owner/repo',
+            sourceType: 'github',
+            isPrimary: true
+          }
+        ]
+      })
+    ]
+  });
+
+  const projectPage = await harness.getData<{
+    suggestedUpstreamProjectKeys?: Record<string, string>;
+  }>('sync.projectPage', {
+    companyId: 'company-1',
+    projectId: 'project-1'
+  });
+
+  assert.equal(projectPage.suggestedUpstreamProjectKeys?.github_issues, 'owner/repo');
+});
+
+test('sync.project.save infers a GitHub repository mapping from the Paperclip project binding', async () => {
+  const restoreFetch = installMockFetch(async (input) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/repos/owner/repo/issues?state=all&per_page=50')) {
+      return jsonResponse([
+        {
+          id: 1,
+          number: 1,
+          title: 'Imported from bound repo',
+          body: 'Imported from GitHub',
+          state: 'open',
+          html_url: 'https://github.com/owner/repo/issues/1',
+          user: {
+            login: 'octocat'
+          },
+          created_at: '2026-04-21T13:03:54.000Z',
+          updated_at: '2026-04-21T13:08:38.000Z'
+        }
+      ]);
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  try {
+    const harness = createTestHarness({
+      manifest,
+      config: {
+        providers: [
+          {
+            id: 'provider-github',
+            type: 'github_issues',
+            name: 'GitHub',
+            githubApiBaseUrl: 'https://api.github.com',
+            githubToken: 'github-token'
+          }
+        ]
+      } as any
+    });
+    await plugin.definition.setup(harness.ctx);
+
+    harness.seed({
+      projects: [
+        makeProject({
+          primaryWorkspace: {
+            id: 'workspace-1',
+            repoUrl: 'https://github.com/owner/repo',
+            sourceType: 'github',
+            isPrimary: true
+          },
+          workspaces: [
+            {
+              id: 'workspace-1',
+              repoUrl: 'https://github.com/owner/repo',
+              sourceType: 'github',
+              isPrimary: true
+            }
+          ]
+        })
+      ]
+    });
+
+    await harness.performAction('sync.project.save', {
+      companyId: 'company-1',
+      projectId: 'project-1',
+      projectName: 'Alpha',
+      providerId: 'provider-github',
+      scheduleFrequencyMinutes: 15,
+      mappings: []
+    });
+
+    const projectPage = await harness.getData<{
+      mappings: Array<{ jiraProjectKey: string }>;
+    }>('sync.projectPage', {
+      companyId: 'company-1',
+      projectId: 'project-1'
+    });
+
+    const syncState = await harness.performAction<{ status: string; importedCount?: number }>('sync.runNow', {
+      companyId: 'company-1',
+      projectId: 'project-1'
+    });
+    const importedIssues = await harness.ctx.issues.list({
+      companyId: 'company-1',
+      projectId: 'project-1'
+    });
+
+    assert.equal(projectPage.mappings[0]?.jiraProjectKey, 'owner/repo');
+    assert.equal(syncState.status, 'success');
+    assert.equal(syncState.importedCount, 1);
+    assert.equal(importedIssues[0]?.title, '[owner/repo#1] Imported from bound repo');
+  } finally {
+    restoreFetch();
+  }
+});
+
 test('sync.runNow applies explicit Jira-to-Paperclip status mappings on imported and updated issues', async () => {
   let searchCalls = 0;
   const restoreFetch = installMockFetch(async (input) => {

@@ -24,6 +24,7 @@ This version now has a fuller provider-aware sync flow:
 - legacy single-provider config using `jiraBaseUrl`, `jiraUserEmail`, `jiraToken`, or `jiraTokenRef` still works as a migration path
 - saved provider tokens stay hidden in the UI; users only enter a new token when they want to replace it
 - each Paperclip project keeps its own selected provider, default assignee, default status, cadence, and Jira mappings inside plugin state
+- GitHub-backed Paperclip projects can infer the default repository from the project's bound GitHub workspace, so GitHub issue sync setup starts with the existing project binding when available
 - each Paperclip project can define a default Jira-to-Paperclip status plus explicit Jira status mappings such as `Done -> done`, and each mapping row can optionally assign a Paperclip agent or `None`
 - a project can explicitly stay on `Provider: None`, which keeps it Paperclip-only while still allowing `Hide imported issues` for previously imported upstream work
 - opening `Sync Issues` from a project or issue now scopes the modal to the current project, while the settings surface stays focused on provider management

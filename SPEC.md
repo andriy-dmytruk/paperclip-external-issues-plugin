@@ -31,6 +31,7 @@ Issue Sync is a Paperclip plugin for synchronizing upstream issues into Papercli
 - The dashboard widget MUST summarize configured project mappings, linked issue count, and last sync state.
 - Manual sync MUST report processed, total, imported, updated, skipped, and failed counts when available.
 - Jira sync settings MUST be saved per Paperclip project, including selected provider, default assignee, default Jira-to-Paperclip status mapping, scheduled cadence, and that project's Jira mappings.
+- When a Paperclip project already carries a GitHub repository binding, GitHub issue sync SHOULD prefill or infer the repository mapping from that project binding before asking the user to type it again.
 - Project sync settings MUST support explicit Jira-to-Paperclip status mappings so Jira status changes can update the local Paperclip workflow status when configured.
 - Jira-to-Paperclip status mappings SHOULD allow each mapped Jira status, including the default fallback row, to choose a Paperclip agent assignment or `None`.
 - Provider-specific project settings MUST remain preserved in state when a project switches to `Provider: None` so they can return if a real provider is selected again later.

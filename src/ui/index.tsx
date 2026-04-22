@@ -181,6 +181,7 @@ type PopupState = {
     defaultStatusAssigneeAgentId?: string | null;
     statusMappings?: StatusMappingRow[];
     scheduleFrequencyMinutes?: number;
+    suggestedUpstreamProjectKeys?: Partial<Record<ProviderType, string>>;
   } | null;
 };
 
@@ -767,6 +768,21 @@ function getProviderProjectPlaceholder(providerType?: ProviderType | string | nu
   return isGitHubProviderType(normalized) ? 'https://github.com/owner/repo' : 'GRB';
 }
 
+function getSuggestedUpstreamProjectKey(
+  providerType: ProviderType | string | null | undefined,
+  source?: {
+    suggestedUpstreamProjectKeys?: Partial<Record<ProviderType, string>> | Record<string, string>;
+  } | null
+): string {
+  const normalized = normalizeProviderType(providerType);
+  if (!normalized) {
+    return '';
+  }
+
+  const suggestedValue = source?.suggestedUpstreamProjectKeys?.[normalized];
+  return typeof suggestedValue === 'string' ? suggestedValue.trim() : '';
+}
+
 function getProviderStatusLabel(providerType?: ProviderType | string | null): string {
   return `${getProviderPlatformName(providerType)} issue status`;
 }
@@ -1248,6 +1264,7 @@ function SyncCenterSurface(props: {
       providerDisplayName?: string | null;
       hasImportedIssues?: boolean;
       isConfigured?: boolean;
+      suggestedUpstreamProjectKeys?: Partial<Record<ProviderType, string>>;
     }>;
   }>('sync.projectList', { companyId });
   const [selectedProjectId, setSelectedProjectId] = useState<string>(props.scopeProjectId ?? '');
@@ -1297,8 +1314,10 @@ function SyncCenterSurface(props: {
       defaultStatusAssigneeAgentId?: string | null;
       statusMappings?: StatusMappingRow[];
       scheduleFrequencyMinutes?: number;
+      suggestedUpstreamProjectKeys?: Partial<Record<ProviderType, string>>;
     } | null;
     navigationContext?: SyncEntryContext | null;
+    suggestedUpstreamProjectKeys?: Partial<Record<ProviderType, string>>;
     mappings: Array<{
       id: string;
       providerId?: string;
@@ -1584,6 +1603,8 @@ function SyncCenterSurface(props: {
       mode: 'create',
       draft: {
         ...createEmptyMappingRow(selectedProvider?.id ?? '', defaultAssignee),
+        jiraProjectKey: getSuggestedUpstreamProjectKey(selectedProvider?.type, projectPage.data)
+          || getSuggestedUpstreamProjectKey(selectedProvider?.type, activeProject),
         paperclipProjectId: activeProjectId,
         paperclipProjectName: activeProject?.projectName ?? projectPage.data?.projectName ?? ''
       }
@@ -1689,7 +1710,7 @@ function SyncCenterSurface(props: {
           .map((row) => ({
             id: row.id,
             providerId: selectedProvider?.id ?? row.providerId.trim(),
-            jiraProjectKey: row.jiraProjectKey.trim().toUpperCase(),
+            jiraProjectKey: normalizeUpstreamProjectKey(row.jiraProjectKey, selectedProvider?.type),
             jiraJql: row.jiraJql.trim() || undefined,
             paperclipProjectId: activeProjectId,
             paperclipProjectName: activeProject.projectName,
@@ -2804,7 +2825,9 @@ function SyncCenterSurface(props: {
                   </div>
                 ) : (
                   <div style={{ fontSize: 12, opacity: 0.75 }}>
-                    Use a GitHub repository URL or `owner/repo`. Filters below apply to the selected repository feed.
+                    {getSuggestedUpstreamProjectKey(selectedProvider?.type, projectPage.data) || getSuggestedUpstreamProjectKey(selectedProvider?.type, activeProject)
+                      ? `Prefilled from this Paperclip project's bound GitHub repository: ${getSuggestedUpstreamProjectKey(selectedProvider?.type, projectPage.data) || getSuggestedUpstreamProjectKey(selectedProvider?.type, activeProject)}. You can still override it here.`
+                      : 'Use a GitHub repository URL or `owner/repo`. Filters below apply to the selected repository feed.'}
                   </div>
                 )}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>

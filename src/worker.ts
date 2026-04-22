@@ -858,6 +858,56 @@ async function findProjectById(
   return project ? { id: project.id, name: project.name } : null;
 }
 
+function getProjectGitHubRepository(project: unknown): string | undefined {
+  if (!project || typeof project !== 'object') {
+    return undefined;
+  }
+
+  const record = project as Record<string, unknown>;
+  const workspaces = Array.isArray(record.workspaces) ? record.workspaces : [];
+  const primaryWorkspace =
+    record.primaryWorkspace && typeof record.primaryWorkspace === 'object'
+      ? record.primaryWorkspace as Record<string, unknown>
+      : null;
+  const codebase =
+    record.codebase && typeof record.codebase === 'object'
+      ? record.codebase as Record<string, unknown>
+      : null;
+
+  const repoCandidates = [
+    primaryWorkspace?.repoUrl,
+    ...workspaces
+      .filter((workspace): workspace is Record<string, unknown> => Boolean(workspace && typeof workspace === 'object'))
+      .sort((left, right) => Number(Boolean(right.isPrimary)) - Number(Boolean(left.isPrimary)))
+      .map((workspace) => workspace.repoUrl),
+    codebase?.repoUrl
+  ];
+
+  for (const candidate of repoCandidates) {
+    const normalized = normalizeOptionalString(candidate);
+    const parsed = normalized ? parseRepositoryReference(normalized) : null;
+    if (parsed) {
+      return `${parsed.owner}/${parsed.repo}`;
+    }
+  }
+
+  return undefined;
+}
+
+async function findProjectGitHubRepository(
+  ctx: PluginSetupContext,
+  companyId: string,
+  projectId?: string,
+  projectName?: string
+): Promise<string | undefined> {
+  const projects = (await ctx.projects.list({ companyId })).filter((project) => !project.archivedAt);
+  const matchedProject = projectId
+    ? projects.find((project) => project.id === projectId)
+    : projects.find((project) => normalizeProjectName(project.name) === normalizeProjectName(projectName));
+
+  return matchedProject ? getProjectGitHubRepository(matchedProject) : undefined;
+}
+
 async function resolvePaperclipProjectForMapping(
   ctx: PluginSetupContext,
   companyId: string,
@@ -3091,8 +3141,14 @@ async function syncMappings(
     if (!resolvedProject) {
       continue;
     }
+    const providerType = await getProviderTypeById(ctx, mapping.providerId);
+    const resolvedGitHubRepository =
+      !mapping.jiraProjectKey && isGitHubProviderType(providerType)
+        ? await findProjectGitHubRepository(ctx, companyId, resolvedProject.id, resolvedProject.name)
+        : undefined;
     mappings.push({
       ...mapping,
+      ...(resolvedGitHubRepository ? { jiraProjectKey: resolvedGitHubRepository } : {}),
       paperclipProjectId: resolvedProject.id,
       paperclipProjectName: resolvedProject.name
     });
@@ -3295,6 +3351,7 @@ async function buildSettingsRegistrationData(
     ?? derivedIssue?.projectId
     ?? (visibleProjects.length === 1 ? visibleProjects[0]?.id : undefined);
   const selectedProject = fallbackProjectId ? visibleProjects.find((project) => project.id === fallbackProjectId) ?? null : null;
+  const selectedProjectGitHubRepository = selectedProject ? getProjectGitHubRepository(selectedProject) : undefined;
   const projectConfig = selectedProject
     ? getProjectConfig(settings, companyId ?? '', selectedProject.id, selectedProject.name)
     : null;
@@ -3345,7 +3402,10 @@ async function buildSettingsRegistrationData(
       providerId: getProjectConfig(settings, companyId ?? '', project.id, project.name)?.providerId ?? null,
       providerDisplayName: providerSummaries.find((provider) => provider.providerId === getProjectConfig(settings, companyId ?? '', project.id, project.name)?.providerId)?.displayName ?? null,
       isConfigured: Boolean(getProjectConfig(settings, companyId ?? '', project.id, project.name)?.providerId),
-      hasImportedIssues: (importedCountsByProjectId[project.id] ?? 0) > 0
+      hasImportedIssues: (importedCountsByProjectId[project.id] ?? 0) > 0,
+      suggestedUpstreamProjectKeys: getProjectGitHubRepository(project)
+        ? { github_issues: getProjectGitHubRepository(project) }
+        : undefined
     })),
     configReady: Boolean(projectConfig?.providerId) && (selectedProviderSummary?.ready ?? false),
     configMessage:
@@ -3364,7 +3424,10 @@ async function buildSettingsRegistrationData(
           defaultStatusAssigneeAgentId: projectConfig?.defaultStatusAssigneeAgentId ?? null,
           statusMappings: getEffectiveStatusMappings(projectConfig),
           scheduleFrequencyMinutes: projectConfig?.scheduleFrequencyMinutes ?? DEFAULT_SYNC_FREQUENCY_MINUTES,
-          mappings: selectedMappings
+          mappings: selectedMappings,
+          suggestedUpstreamProjectKeys: selectedProjectGitHubRepository
+            ? { github_issues: selectedProjectGitHubRepository }
+            : undefined
         }
       : null,
     projectPage: selectedProject
@@ -3372,6 +3435,9 @@ async function buildSettingsRegistrationData(
           projectId: selectedProject.id,
           projectName: selectedProject.name,
           selectedProviderId: projectConfig?.providerId ?? null,
+          suggestedUpstreamProjectKeys: selectedProjectGitHubRepository
+            ? { github_issues: selectedProjectGitHubRepository }
+            : undefined,
           showProviderSelection: true,
           showHideImported: true,
           showProjectSettings: Boolean(projectConfig?.providerId),
@@ -3465,7 +3531,11 @@ async function buildSyncProjectListData(
             providerId: normalizeOptionalString(record.providerId) ?? null,
             providerDisplayName: normalizeOptionalString(record.providerDisplayName) ?? null,
             hasImportedIssues: record.hasImportedIssues === true,
-            isConfigured: record.isConfigured === true
+            isConfigured: record.isConfigured === true,
+            suggestedUpstreamProjectKeys:
+              record.suggestedUpstreamProjectKeys && typeof record.suggestedUpstreamProjectKeys === 'object'
+                ? record.suggestedUpstreamProjectKeys as Record<string, string>
+                : undefined
           };
         })
       : []
@@ -4221,15 +4291,31 @@ async function persistProjectRegistration(
           : (existing?.defaultStatusAssigneeAgentId ?? null),
       statusMappings: groupedInput.statusMappings ?? existing?.statusMappings ?? getDefaultStatusMappings(),
       scheduleFrequencyMinutes,
-      mappings: groupedInput.mappings.map((entry, mappingIndex) => ({
+      mappings: (() => {
+        const normalizedMappings = groupedInput.mappings.map((entry, mappingIndex) => ({
         id: normalizeOptionalString((entry as Record<string, unknown>).id) ?? `mapping-${mappingIndex + 1}`,
         jiraProjectKey: normalizeStoredProjectKey((entry as Record<string, unknown>).jiraProjectKey) ?? '',
         ...(normalizeOptionalString((entry as Record<string, unknown>).jiraJql) ? { jiraJql: normalizeOptionalString((entry as Record<string, unknown>).jiraJql) } : {}),
         ...(entry && typeof entry === 'object' && (entry as Record<string, unknown>).filters ? { filters: normalizeTaskFilters((entry as Record<string, unknown>).filters) } : {})
-      })).filter((entry) => Boolean(entry.jiraProjectKey)),
+      })).filter((entry) => Boolean(entry.jiraProjectKey));
+        if (normalizedMappings.length > 0) {
+          return normalizedMappings;
+        }
+
+        return normalizedMappings;
+      })(),
       syncState: existing?.syncState,
       connectionTest: existing?.connectionTest
     };
+    if (projectConfig.mappings.length === 0 && isGitHubProviderType(await getProviderTypeById(ctx, groupedInput.providerId))) {
+      const inferredRepository = await findProjectGitHubRepository(ctx, companyId, groupedInput.projectId, groupedInput.projectName);
+      if (inferredRepository) {
+        projectConfig.mappings = [{
+          id: 'mapping-1',
+          jiraProjectKey: inferredRepository
+        }];
+      }
+    }
     nextSettings = await saveProjectConfig(ctx, nextSettings, projectConfig);
   }
 
