@@ -53,6 +53,12 @@ export type ProviderConfig =
   | GitHubIssuesProviderConfig;
 
 export type ProviderConfigInput = Partial<ProviderConfig> & Record<string, unknown>;
+export type PersistedProviderConfigInput = Record<string, unknown> & {
+  id: string;
+  type: 'jira';
+  name: string;
+  providerKind?: ProviderType;
+};
 
 export const PROVIDER_TYPE_LABELS: Record<ProviderType, string> = {
   jira_dc: 'Jira Data Center',
@@ -107,7 +113,18 @@ export function normalizeProviderConfig(
   }
 
   const record = value as ProviderConfigInput;
-  const type = normalizeProviderType(record.type);
+  const rawType = normalizeOptionalString(record.type);
+  const type =
+    normalizeProviderType(record.providerKind)
+    ?? normalizeProviderType(record.providerType)
+    ?? (rawType === 'jira' && (
+      normalizeOptionalString(record.githubApiBaseUrl)
+      || normalizeOptionalString(record.githubToken)
+      || normalizeOptionalString(record.githubTokenRef)
+      || normalizeOptionalString(record.defaultRepository)
+    )
+      ? 'github_issues'
+      : normalizeProviderType(rawType));
   const name = normalizeOptionalString(record.name);
   const id = normalizeOptionalString(record.id) ?? `provider-${index + 1}`;
   if (!type || !name) {
@@ -152,4 +169,37 @@ export function normalizeProviderConfigs(value: unknown): ProviderConfig[] {
   return value
     .map((entry, index) => normalizeProviderConfig(entry, index))
     .filter((entry): entry is ProviderConfig => entry !== null);
+}
+
+export function serializeProviderConfigForHost(config: ProviderConfig): PersistedProviderConfigInput {
+  if (isJiraProviderType(config.type)) {
+    return {
+      id: config.id,
+      type: 'jira',
+      providerKind: config.type,
+      name: config.name,
+      ...(normalizeOptionalString(config.jiraBaseUrl) ? { jiraBaseUrl: normalizeOptionalString(config.jiraBaseUrl) } : {}),
+      ...(normalizeOptionalString(config.jiraUserEmail) ? { jiraUserEmail: normalizeOptionalString(config.jiraUserEmail) } : {}),
+      ...(normalizeOptionalString(config.jiraToken) ? { jiraToken: normalizeOptionalString(config.jiraToken) } : {}),
+      ...(normalizeOptionalString(config.jiraTokenRef) ? { jiraTokenRef: normalizeOptionalString(config.jiraTokenRef) } : {}),
+      ...(normalizeOptionalString(config.defaultIssueType)
+        ? { defaultIssueType: normalizeOptionalString(config.defaultIssueType) }
+        : {})
+    };
+  }
+
+  return {
+    id: config.id,
+    type: 'jira',
+    providerKind: config.type,
+    name: config.name,
+    ...(normalizeOptionalString(config.githubApiBaseUrl)
+      ? { githubApiBaseUrl: normalizeOptionalString(config.githubApiBaseUrl) }
+      : {}),
+    ...(normalizeOptionalString(config.githubToken) ? { githubToken: normalizeOptionalString(config.githubToken) } : {}),
+    ...(normalizeOptionalString(config.githubTokenRef) ? { githubTokenRef: normalizeOptionalString(config.githubTokenRef) } : {}),
+    ...(normalizeOptionalString(config.defaultRepository)
+      ? { defaultRepository: normalizeOptionalString(config.defaultRepository) }
+      : {})
+  };
 }

@@ -18,12 +18,14 @@ This version now has a fuller provider-aware sync flow:
 - the hosted sync center lets users create reusable upstream providers, while project and issue sync surfaces configure one Paperclip project at a time
 - the settings surface is now provider-only, and project-scoped sync opens on a dedicated page for the selected Paperclip project instead of mixing all project settings in one view
 - provider definitions live in plugin config so one upstream connection can be reused across many Paperclip projects
+- provider config writes stay backward-compatible with older Paperclip host schemas by storing a legacy-safe outer shape while preserving the real provider kind for the plugin
 - providers are managed on their own settings page, and each provider opens on its own detail page with `Back` navigation instead of a nested popup
+- provider cards separate neutral metadata badges from live health, so saved tokens and provider type stay informational while connectivity shows as `Connected`, `Degraded`, `Not tested`, or `Needs config`
 - legacy single-provider config using `jiraBaseUrl`, `jiraUserEmail`, `jiraToken`, or `jiraTokenRef` still works as a migration path
 - saved provider tokens stay hidden in the UI; users only enter a new token when they want to replace it
 - each Paperclip project keeps its own selected provider, default assignee, default status, cadence, and Jira mappings inside plugin state
 - each Paperclip project can define a default Jira-to-Paperclip status plus explicit Jira status mappings such as `Done -> done`, and each mapping row can optionally assign a Paperclip agent or `None`
-- a project can explicitly stay on `Provider: None`, which keeps it Paperclip-only while still allowing `Hide imported issues` for previously imported Jira work
+- a project can explicitly stay on `Provider: None`, which keeps it Paperclip-only while still allowing `Hide imported issues` for previously imported upstream work
 - opening `Sync Issues` from a project or issue now scopes the modal to the current project, while the settings surface stays focused on provider management
 - before a provider is selected on a project page, the only available action besides provider selection is `Hide imported issues`
 - manual and scheduled sync report processed, total, imported, updated, skipped, and failed counts
@@ -39,10 +41,11 @@ This version now has a fuller provider-aware sync flow:
 - synced issue detail now shows both the upstream Jira assignee and the upstream Jira creator, refreshed from live Jira issue data when available
 - new mappings start with `Active only` enabled and default the assignee filter to the current Jira user for the selected provider when available
 - the main `Sync issues` action saves project settings automatically before it runs
-- `Hide imported issues` only targets the selected project and can hide untouched imported Jira issues from active Paperclip views
-- the hide dialog still opens for an empty-state review, and hidden imported issues are restored automatically if the same Jira issue appears again on a later sync
+- `Hide imported issues` only targets the selected project and can hide imported upstream issues from active Paperclip views, even after later local sync activity
+- the hide dialog still opens for an empty-state review, and hidden imported issues are restored automatically if the same upstream issue appears again on a later sync
 - provider adapters now live behind a shared registry and typed capabilities so new trackers can be added without rewriting the sync shell
 - Jira Data Center continues to use the checked-in generated OpenAPI client, while GitHub provider wiring uses the official Octokit client
+- provider health is now stored per provider and refreshed by both explicit connection tests and successful or failed sync fetches
 
 ## Important note on Atlassian MCP
 

@@ -20,7 +20,9 @@ import {
 import {
   isGitHubProviderType,
   isJiraProviderType,
-  normalizeProviderConfig
+  normalizeProviderConfig,
+  normalizeProviderType,
+  serializeProviderConfigForHost
 } from '../providers/shared/config.ts';
 import {
   formatJiraUserLabel,
@@ -116,6 +118,8 @@ type PopupState = {
     providerKey: ProviderType;
     displayName: string;
     status: string;
+    healthLabel?: string;
+    healthMessage?: string;
     configSummary?: string;
     supportsConnectionTest?: boolean;
     defaultIssueType?: string;
@@ -152,6 +156,9 @@ type PopupState = {
       providerId: string;
       providerType: ProviderType;
       displayName: string;
+      status?: string;
+      healthLabel?: string;
+      healthMessage?: string;
       configSummary?: string;
       tokenSaved?: boolean;
     }>;
@@ -533,6 +540,35 @@ function badgeStyle(tone: 'local' | 'synced' | 'info' | 'error'): React.CSSPrope
   };
 }
 
+function neutralBadgeStyle(): React.CSSProperties {
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
+    border: '1px solid var(--border)',
+    background: 'color-mix(in srgb, currentColor 8%, transparent)',
+    color: 'inherit',
+    padding: '4px 10px',
+    fontSize: 12,
+    fontWeight: 700,
+    opacity: 0.88
+  };
+}
+
+function healthBadgeStyle(status?: string | null): React.CSSProperties {
+  if (status === 'connected') {
+    return badgeStyle('synced');
+  }
+  if (status === 'degraded') {
+    return badgeStyle('error');
+  }
+  if (status === 'needs_config') {
+    return badgeStyle('local');
+  }
+  return neutralBadgeStyle();
+}
+
 function progressBarStyle(progressPercent: number): React.CSSProperties {
   return {
     width: '100%',
@@ -607,12 +643,16 @@ export function buildSyncProgressLabel(syncProgress?: SyncProgressState | null):
   return 'Ready to sync.';
 }
 
-export function buildCommentOriginLabel(origin: CommentSyncPresentation['origin']): string {
+export function buildCommentOriginLabel(
+  origin: CommentSyncPresentation['origin'],
+  providerKey?: ProviderType | string | null
+): string {
+  const platform = getProviderPlatformName(providerKey);
   if (origin === 'provider_pull') {
-    return 'Fetched from Jira';
+    return `Fetched from ${platform}`;
   }
   if (origin === 'provider_push') {
-    return 'Uploaded to Jira';
+    return `Uploaded to ${platform}`;
   }
   return 'Local Paperclip comment';
 }
@@ -658,12 +698,14 @@ function createProviderId(): string {
   return `provider-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function createEmptyProviderDraft(): JiraProviderConfig {
+function createEmptyProviderDraft(type: ProviderType = PROVIDER_TYPE_OPTIONS[0]): JiraProviderConfig {
   return {
     id: createProviderId(),
-    type: 'jira_dc',
+    type,
     name: '',
-    defaultIssueType: DEFAULT_JIRA_ISSUE_TYPE
+    ...(isGitHubProviderType(type)
+      ? { githubApiBaseUrl: 'https://api.github.com' }
+      : { defaultIssueType: DEFAULT_JIRA_ISSUE_TYPE })
   };
 }
 
@@ -708,6 +750,86 @@ function getProviderApiBase(provider: JiraProviderConfig | null | undefined): st
 function normalizeUpstreamProjectKey(value: string, providerType?: ProviderType): string {
   const trimmed = value.trim();
   return isGitHubProviderType(providerType) ? trimmed : trimmed.toUpperCase();
+}
+
+function getProviderPlatformName(providerType?: ProviderType | string | null): string {
+  const normalized = normalizeProviderType(providerType);
+  return isGitHubProviderType(normalized) ? 'GitHub' : 'Jira';
+}
+
+function getProviderProjectLabel(providerType?: ProviderType | string | null): string {
+  const normalized = normalizeProviderType(providerType);
+  return isGitHubProviderType(normalized) ? 'GitHub repository URL' : 'Jira project key';
+}
+
+function getProviderProjectPlaceholder(providerType?: ProviderType | string | null): string {
+  const normalized = normalizeProviderType(providerType);
+  return isGitHubProviderType(normalized) ? 'https://github.com/owner/repo' : 'GRB';
+}
+
+function getProviderStatusLabel(providerType?: ProviderType | string | null): string {
+  return `${getProviderPlatformName(providerType)} issue status`;
+}
+
+function getProviderUsersPlaceholder(providerType?: ProviderType | string | null): string {
+  return `Search ${getProviderPlatformName(providerType)} users`;
+}
+
+function getProviderCurrentUserActionLabel(providerType?: ProviderType | string | null, busy?: boolean): string {
+  const platform = getProviderPlatformName(providerType);
+  return busy ? `Loading ${platform} user…` : `Use current ${platform} user`;
+}
+
+function getProviderMappingSummaryNoun(providerType?: ProviderType | string | null): string {
+  return isGitHubProviderType(normalizeProviderType(providerType)) ? 'repository feed' : 'project feed';
+}
+
+function getOpenInProviderLabel(providerType?: ProviderType | string | null): string {
+  return `Open in ${getProviderPlatformName(providerType)}`;
+}
+
+function getPullFromProviderLabel(providerType?: ProviderType | string | null, busy?: boolean): string {
+  const platform = getProviderPlatformName(providerType);
+  return busy ? 'Pulling…' : `Pull from ${platform}`;
+}
+
+function getProviderCommentsLabel(providerType?: ProviderType | string | null): string {
+  return `${getProviderPlatformName(providerType)} comments`;
+}
+
+function getProviderPostsLabel(providerType?: ProviderType | string | null): string {
+  return `Posts to ${getProviderPlatformName(providerType)}`;
+}
+
+function getProviderCommentPlaceholder(providerType?: ProviderType | string | null): string {
+  return `Add a comment to this ${getProviderPlatformName(providerType)} issue`;
+}
+
+function getProviderIssueSelectValue(
+  providerType: ProviderType | string | null | undefined,
+  statusName?: string | null
+): string {
+  if (!isGitHubProviderType(normalizeProviderType(providerType))) {
+    return '';
+  }
+
+  return String(statusName).toLowerCase() === 'closed' ? 'closed' : 'open';
+}
+
+function formatProviderHealthLabel(status?: string, fallback?: string): string {
+  if (fallback) {
+    return fallback;
+  }
+  if (status === 'connected') {
+    return 'Connected';
+  }
+  if (status === 'degraded') {
+    return 'Degraded';
+  }
+  if (status === 'needs_config') {
+    return 'Needs config';
+  }
+  return 'Not tested';
 }
 
 function createEmptyMappingRow(providerId = '', defaultAssignee?: JiraUserReference | null): MappingRow {
@@ -800,6 +922,7 @@ function JiraUserAutocomplete(props: {
   companyId: string;
   providerId?: string | null;
   label: string;
+  hideLabel?: boolean;
   value?: JiraUserReference | null;
   placeholder?: string;
   disabled?: boolean;
@@ -826,7 +949,7 @@ function JiraUserAutocomplete(props: {
 
   return (
     <label style={{ ...stackStyle(6), position: 'relative', zIndex: open ? 80 : 1 }}>
-      <span style={{ fontSize: 13, fontWeight: 600 }}>{props.label}</span>
+      {props.hideLabel ? null : <span style={{ fontSize: 13, fontWeight: 600 }}>{props.label}</span>}
       <input
         style={inputStyle()}
         value={query}
@@ -870,7 +993,7 @@ function JiraUserAutocomplete(props: {
         }}
         >
           {search.loading ? (
-            <div style={{ fontSize: 12, opacity: 0.72 }}>Searching Jira users…</div>
+            <div style={{ fontSize: 12, opacity: 0.72 }}>Searching users…</div>
           ) : suggestions.length > 0 ? suggestions.map((suggestion) => (
             <button
               key={suggestion.accountId}
@@ -895,7 +1018,7 @@ function JiraUserAutocomplete(props: {
               ) : null}
             </button>
           )) : (
-            <div style={{ fontSize: 12, opacity: 0.72 }}>No Jira users match this search yet.</div>
+            <div style={{ fontSize: 12, opacity: 0.72 }}>No users match this search yet.</div>
           )}
         </div>
       ) : null}
@@ -945,7 +1068,7 @@ function useActionRunner<TParams extends Record<string, unknown>>(actionKey: str
       setMessage(nextMessage);
       setTone('success');
       toast({
-        title: 'Jira Sync',
+        title: 'Issue Sync',
         body: nextMessage,
         tone: 'success'
       });
@@ -955,11 +1078,11 @@ function useActionRunner<TParams extends Record<string, unknown>>(actionKey: str
       setMessage(nextMessage);
       setTone('error');
       toast({
-        title: 'Jira Sync',
+        title: 'Issue Sync',
         body: nextMessage,
         tone: 'error'
       });
-      throw error;
+      return null;
     } finally {
       setBusy(false);
     }
@@ -1026,6 +1149,7 @@ function SyncProgressPanel(props: {
 
 function MappingEditor(props: {
   rows: MappingRow[];
+  providerType?: ProviderType | null;
   providers: Array<{ providerId: string; displayName: string }>;
   currentProjectName?: string;
   onCreate: () => void;
@@ -1046,7 +1170,7 @@ function MappingEditor(props: {
       </div>
       {props.rows.length === 0 ? (
         <div style={{ fontSize: 13, opacity: 0.72 }}>
-          No mappings yet. Add one to connect this Paperclip project to an upstream Jira project.
+          No mappings yet. Add one to connect this Paperclip project to an upstream issue source.
         </div>
       ) : props.rows.map((row, index) => {
         const providerLabel = props.providers.find((provider) => provider.providerId === row.providerId)?.displayName ?? 'No provider';
@@ -1062,7 +1186,7 @@ function MappingEditor(props: {
                 ) : null}
               </div>
               <div style={{ fontSize: 13, opacity: 0.84 }}>
-                <strong>{row.jiraProjectKey || 'No Jira project key'}</strong>
+                <strong>{row.jiraProjectKey || `No ${getProviderProjectLabel(props.providerType).toLowerCase()}`}</strong>
                 {' '}into{' '}
                 <strong>{props.currentProjectName || row.paperclipProjectName || 'No Paperclip project selected'}</strong>
               </div>
@@ -1074,7 +1198,7 @@ function MappingEditor(props: {
                 </div>
               ) : (
                 <div style={{ fontSize: 12, opacity: 0.7 }}>
-                  No extra filters. This mapping syncs the mapped Jira project feed.
+                  No extra filters. This mapping syncs the mapped {getProviderMappingSummaryNoun(props.providerType)}.
                 </div>
               )}
               <div style={rowStyle()}>
@@ -1146,6 +1270,8 @@ function SyncCenterSurface(props: {
       providerKey: ProviderType;
       displayName: string;
       status: string;
+      healthLabel?: string;
+      healthMessage?: string;
       configSummary?: string;
       supportsConnectionTest?: boolean;
       defaultIssueType?: string;
@@ -1194,6 +1320,9 @@ function SyncCenterSurface(props: {
       providerId: string;
       providerType: ProviderType;
       displayName: string;
+      status?: string;
+      healthLabel?: string;
+      healthMessage?: string;
       configSummary?: string;
       tokenSaved?: boolean;
     }>;
@@ -1215,6 +1344,8 @@ function SyncCenterSurface(props: {
       defaultRepository?: string;
     };
     tokenSaved?: boolean;
+    healthStatus?: string;
+    healthMessage?: string;
     backTarget?: string;
     availableProviderTypes?: Array<{
       value: ProviderType;
@@ -1414,16 +1545,20 @@ function SyncCenterSurface(props: {
       return;
     }
 
+    if (!selectedProviderDetailId && providerDraft) {
+      return;
+    }
+
     const detailFields = providerDetail.data?.fields;
     const existingProvider = selectedProviderDetailId
       ? configuredProviders.find((provider) => provider.id === selectedProviderDetailId) ?? null
       : null;
     setProviderDraft({
-      ...(existingProvider ?? createEmptyProviderDraft()),
+      ...(existingProvider ?? createEmptyProviderDraft(newProviderType)),
       id: existingProvider?.id ?? selectedProviderDetailId ?? createProviderId(),
-      type: providerDetail.data?.providerType ?? existingProvider?.type ?? newProviderType,
+      type: existingProvider?.type ?? providerDetail.data?.providerType ?? newProviderType,
       name: detailFields?.name ?? existingProvider?.name ?? '',
-      ...(isGitHubProviderType(providerDetail.data?.providerType ?? existingProvider?.type ?? newProviderType)
+      ...(isGitHubProviderType(existingProvider?.type ?? providerDetail.data?.providerType ?? newProviderType)
         ? {
             githubApiBaseUrl: detailFields?.githubApiBaseUrl ?? (existingProvider && isGitHubProviderType(existingProvider.type) ? existingProvider.githubApiBaseUrl : '') ?? '',
             defaultRepository: detailFields?.defaultRepository ?? (existingProvider && isGitHubProviderType(existingProvider.type) ? existingProvider.defaultRepository : '') ?? ''
@@ -1662,7 +1797,7 @@ function SyncCenterSurface(props: {
 
     const nextConfig: JiraPluginConfig = {
       ...configJson,
-      providers: nextProviders,
+      providers: nextProviders.map((provider) => serializeProviderConfigForHost(provider)),
       jiraBaseUrl: undefined,
       jiraUserEmail: undefined,
       jiraToken: undefined,
@@ -1703,7 +1838,9 @@ function SyncCenterSurface(props: {
 
     const nextConfig: JiraPluginConfig = {
       ...configJson,
-      providers: configuredProviders.filter((provider) => provider.id !== providerDraft.id),
+      providers: configuredProviders
+        .filter((provider) => provider.id !== providerDraft.id)
+        .map((provider) => serializeProviderConfigForHost(provider)),
       jiraBaseUrl: undefined,
       jiraUserEmail: undefined,
       jiraToken: undefined,
@@ -1797,15 +1934,12 @@ function SyncCenterSurface(props: {
       message?: string;
     };
     const candidates = result.candidates ?? [];
-    const defaultSelected = candidates
-      .filter((candidate) => candidate.status === 'backlog')
-      .map((candidate) => candidate.issueId);
     setCleanupModal({
-      mode: 'status',
+      mode: 'all',
       status: 'backlog',
       customFilter: '',
       candidates,
-      selectedIssueIds: defaultSelected
+      selectedIssueIds: candidates.map((candidate) => candidate.issueId)
     });
   }
 
@@ -1844,11 +1978,22 @@ function SyncCenterSurface(props: {
   }
 
   function openProviderDirectoryPage() {
+    setProviderDraft(null);
     setSelectedProviderDetailId(null);
     setCurrentPage('providers');
   }
 
+  function openCreateProviderPage() {
+    setProviderDraft(createEmptyProviderDraft(newProviderType));
+    setProviderDraftToken('');
+    setSelectedProviderDetailId(null);
+    setCurrentPage('provider-detail');
+  }
+
   function openProviderDetailPage(providerId?: string) {
+    if (providerId) {
+      setProviderDraft(null);
+    }
     setSelectedProviderDetailId(providerId ?? null);
     setCurrentPage('provider-detail');
   }
@@ -1954,7 +2099,7 @@ function SyncCenterSurface(props: {
             <button
               type="button"
               style={buttonStyle()}
-              onClick={() => setCurrentPage('providers')}
+              onClick={() => openProviderDirectoryPage()}
             >
               {buttonLabel('back', 'Back')}
             </button>
@@ -2003,35 +2148,54 @@ function SyncCenterSurface(props: {
                 <div style={rowStyle()}>
                   <strong>Provider</strong>
                   {selectedProviderStatus ? (
-                    <span style={badgeStyle(
-                      selectedProviderStatus.status === 'connected' || selectedProviderStatus.status === 'configured'
-                        ? 'synced'
-                        : 'local'
-                    )}
-                    >
-                      {selectedProviderStatus.status === 'connected' ? 'Connected' : selectedProviderStatus.status}
+                    <span style={healthBadgeStyle(selectedProviderStatus.status)}>
+                      {formatProviderHealthLabel(selectedProviderStatus.status, selectedProviderStatus.healthLabel)}
                     </span>
                   ) : null}
                 </div>
-                <label style={stackStyle(6)}>
+                <div style={stackStyle(6)}>
                   <span style={{ fontSize: 13, fontWeight: 600 }}>Saved provider</span>
-                  <select
-                    style={inputStyle()}
-                    value={selectedProviderId}
-                    disabled={!activeProjectId}
-                    onChange={(event) => void handleProviderSelection(event.target.value)}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', gap: 8, alignItems: 'end' }}>
+                    <select
+                      style={inputStyle()}
+                      value={selectedProviderId}
+                      disabled={!activeProjectId}
+                      onChange={(event) => void handleProviderSelection(event.target.value)}
+                    >
+                      <option value="">None</option>
+                      {configuredProviders.map((provider) => (
+                        <option key={provider.id} value={provider.id}>{provider.name || 'Untitled provider'}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      style={buttonStyle()}
+                      onClick={() => openCreateProviderPage()}
+                    >
+                      {buttonLabel('add', 'Create provider')}
+                    </button>
+                  </div>
+                </div>
+                <div style={rowStyle()}>
+                  <button
+                    type="button"
+                    style={buttonStyle()}
+                    disabled={!selectedProvider}
+                    onClick={() => openProviderDetailPage(selectedProvider?.id)}
                   >
-                    <option value="">None</option>
-                    {configuredProviders.map((provider) => (
-                      <option key={provider.id} value={provider.id}>{provider.name || 'Untitled provider'}</option>
-                    ))}
-                  </select>
-                </label>
+                    {buttonLabel('save', 'Edit provider')}
+                  </button>
+                </div>
                 <div style={{ fontSize: 12, opacity: 0.75 }}>
                   {providerEnabled
                     ? (selectedProviderStatus?.configSummary ?? 'This provider is ready for project sync.')
                     : 'Select a provider when you want to enable sync. Imported-issue cleanup stays available even when syncing is disabled.'}
                 </div>
+                {providerEnabled && selectedProviderStatus?.healthMessage ? (
+                  <div style={{ fontSize: 12, opacity: 0.72 }}>
+                    {selectedProviderStatus.healthMessage}
+                  </div>
+                ) : null}
                 {providerEnabled ? (
                   <div style={rowStyle()}>
                     <button
@@ -2083,7 +2247,7 @@ function SyncCenterSurface(props: {
                         label="Default assignee"
                         value={defaultAssignee}
                         disabled={!activeProjectId}
-                        placeholder="Search Jira users"
+                        placeholder={getProviderUsersPlaceholder(selectedProvider?.type)}
                         onChange={setDefaultAssignee}
                       />
                     </div>
@@ -2107,7 +2271,7 @@ function SyncCenterSurface(props: {
                           });
                         }}
                       >
-                        {buttonLabel('user', refreshIdentity.busy ? 'Loading Jira user…' : 'Use current Jira user')}
+                        {buttonLabel('user', getProviderCurrentUserActionLabel(selectedProvider?.type, refreshIdentity.busy))}
                       </button>
                     </div>
                     <label style={stackStyle(6)}>
@@ -2130,6 +2294,7 @@ function SyncCenterSurface(props: {
                     <strong>Project mappings</strong>
                     <MappingEditor
                       rows={rows}
+                      providerType={selectedProvider?.type ?? null}
                       currentProjectName={activeProject?.projectName ?? projectPage.data?.projectName ?? undefined}
                       providers={(projectPage.data?.availableProviders ?? []).map((provider) => ({
                         providerId: provider.providerId,
@@ -2150,7 +2315,7 @@ function SyncCenterSurface(props: {
                     <div style={stackStyle(4)}>
                       <strong>Upstream to Paperclip status mapping</strong>
                       <div style={{ fontSize: 12, opacity: 0.74 }}>
-                        Jira status changes can update the local Paperclip status and optionally assign a Paperclip agent.
+                        {getProviderPlatformName(selectedProvider?.type)} issue status changes can update the local Paperclip status and optionally assign a Paperclip agent.
                       </div>
                     </div>
                     <div style={{
@@ -2162,7 +2327,7 @@ function SyncCenterSurface(props: {
                       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                         <thead>
                           <tr style={{ background: 'color-mix(in srgb, var(--muted, #888) 10%, transparent)' }}>
-                            <th style={statusMappingHeaderCellStyle()}>Jira Status</th>
+                            <th style={statusMappingHeaderCellStyle()}>{getProviderStatusLabel(selectedProvider?.type)}</th>
                             <th style={statusMappingHeaderCellStyle()}>Paperclip Status</th>
                             <th style={statusMappingHeaderCellStyle()}>Assign Agent</th>
                             <th style={statusMappingHeaderCellStyle()}>Actions</th>
@@ -2208,7 +2373,7 @@ function SyncCenterSurface(props: {
                                 <input
                                   style={inputStyle()}
                                   value={mapping.jiraStatus}
-                                  placeholder="Jira status name"
+                                  placeholder={getProviderStatusLabel(selectedProvider?.type)}
                                   onChange={(event) => setStatusMappings((current) => current.map((entry) => (
                                     entry.id === mapping.id
                                       ? { ...entry, jiraStatus: event.target.value }
@@ -2333,6 +2498,8 @@ function SyncCenterSurface(props: {
                     type="button"
                     style={buttonStyle('primary')}
                     onClick={() => {
+                      setProviderDraft(createEmptyProviderDraft(newProviderType));
+                      setProviderDraftToken('');
                       setSelectedProviderDetailId(null);
                       openProviderDetailPage();
                     }}
@@ -2357,8 +2524,11 @@ function SyncCenterSurface(props: {
               >
                 <div style={rowStyle()}>
                   <strong>{provider.displayName}</strong>
-                  <span style={badgeStyle('info')}>{getProviderTypeLabel(provider.providerType)}</span>
-                  {provider.tokenSaved ? <span style={badgeStyle('synced')}>Token saved</span> : null}
+                  <span style={neutralBadgeStyle()}>{getProviderTypeLabel(provider.providerType)}</span>
+                  {provider.tokenSaved ? <span style={neutralBadgeStyle()}>Token saved</span> : null}
+                  <span style={healthBadgeStyle(provider.status)}>
+                    {formatProviderHealthLabel(provider.status, provider.healthLabel)}
+                  </span>
                 </div>
                 <div style={{ fontSize: 13, opacity: 0.8 }}>
                   {provider.configSummary ?? 'Open to review connection details.'}
@@ -2373,18 +2543,44 @@ function SyncCenterSurface(props: {
             <div style={stackStyle(12)}>
               <div style={rowStyle()}>
                 <strong>{providerDetail.data?.mode === 'edit' ? 'Edit provider' : 'Create provider'}</strong>
-                <span style={badgeStyle('info')}>{getProviderTypeLabel(providerDraft.type)}</span>
-                {providerDetail.data?.tokenSaved ? <span style={badgeStyle('synced')}>Token already saved</span> : null}
+                <span style={neutralBadgeStyle()}>{getProviderTypeLabel(providerDraft.type)}</span>
+                {providerDetail.data?.tokenSaved ? <span style={neutralBadgeStyle()}>Token saved</span> : null}
+                <span style={healthBadgeStyle(providerDetail.data?.healthStatus)}>
+                  {formatProviderHealthLabel(providerDetail.data?.healthStatus)}
+                </span>
               </div>
+              {providerDetail.data?.healthMessage ? (
+                <div style={{ fontSize: 12, opacity: 0.74 }}>
+                  {providerDetail.data.healthMessage}
+                </div>
+              ) : null}
               <label style={stackStyle(6)}>
                 <span style={{ fontSize: 13, fontWeight: 600 }}>Provider type</span>
                 <select
                   style={inputStyle()}
                   value={providerDraft.type}
-                  onChange={(event) => setProviderDraft((current) => current ? {
-                    ...current,
-                    type: event.target.value as ProviderType
-                  } : null)}
+                  onChange={(event) => {
+                    const nextType = event.target.value as ProviderType;
+                    setNewProviderType(nextType);
+                    setProviderDraft((current) => current ? {
+                      ...current,
+                      type: nextType,
+                      ...(isGitHubProviderType(nextType)
+                        ? {
+                            githubApiBaseUrl: current.githubApiBaseUrl ?? 'https://api.github.com',
+                            defaultRepository: current.defaultRepository ?? '',
+                            jiraBaseUrl: undefined,
+                            jiraUserEmail: undefined
+                          }
+                        : {
+                            jiraBaseUrl: current.jiraBaseUrl ?? '',
+                            jiraUserEmail: current.jiraUserEmail ?? '',
+                            defaultIssueType: current.defaultIssueType ?? DEFAULT_JIRA_ISSUE_TYPE,
+                            githubApiBaseUrl: undefined,
+                            defaultRepository: undefined
+                          })
+                    } : createEmptyProviderDraft(nextType));
+                  }}
                 >
                   {(providerDetail.data?.availableProviderTypes ?? providerDirectory.data?.availableProviderTypes ?? []).map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
@@ -2478,7 +2674,7 @@ function SyncCenterSurface(props: {
               )}
               <label style={stackStyle(6)}>
                 <span style={{ fontSize: 13, fontWeight: 600 }}>
-                  {isJiraProviderType(providerDraft.type) ? 'Jira API token' : 'GitHub token'}
+                  {isJiraProviderType(providerDraft.type) ? 'Jira API token' : 'GitHub Personal Access Token'}
                 </span>
                 <input
                   style={inputStyle()}
@@ -2487,11 +2683,26 @@ function SyncCenterSurface(props: {
                   placeholder={
                     providerDetail.data?.tokenSaved
                       ? 'Saved token is hidden. Enter a new token only to replace it.'
-                      : (isJiraProviderType(providerDraft.type) ? 'Paste Jira API token' : 'Paste GitHub token')
+                      : (isJiraProviderType(providerDraft.type) ? 'Paste Jira API token' : 'Paste GitHub Personal Access Token')
                   }
                   onChange={(event) => setProviderDraftToken(event.target.value)}
                 />
               </label>
+              {!isJiraProviderType(providerDraft.type) ? (
+                <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.45 }}>
+                  Use a GitHub Personal Access Token. Fine-grained tokens should grant issue write access for the selected repository.
+                  {' '}
+                  <a
+                    href="https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens"
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: 'inherit' }}
+                  >
+                    Learn about GitHub personal access tokens
+                  </a>
+                  .
+                </div>
+              ) : null}
               <div style={rowStyle()}>
                 <button
                   type="button"
@@ -2547,7 +2758,7 @@ function SyncCenterSurface(props: {
               <div style={stackStyle(12)}>
                 <div style={rowStyle()}>
                   <strong>{mappingModal.mode === 'create' ? 'Create mapping' : 'Edit mapping'}</strong>
-                  <span style={badgeStyle('info')}>Jira to Paperclip</span>
+                  <span style={badgeStyle('info')}>{getProviderPlatformName(selectedProvider?.type)} to Paperclip</span>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
                   <div style={panelStyle()}>
@@ -2561,33 +2772,41 @@ function SyncCenterSurface(props: {
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
                   <label style={stackStyle(6)}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>Jira project key</span>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>{getProviderProjectLabel(selectedProvider?.type)}</span>
                     <input
                       style={inputStyle()}
                       value={mappingModal.draft.jiraProjectKey}
-                      placeholder="GRB"
+                      placeholder={getProviderProjectPlaceholder(selectedProvider?.type)}
                       onChange={(event) => setMappingModal((current) => current ? {
                         ...current,
                         draft: { ...current.draft, jiraProjectKey: event.target.value }
                       } : null)}
                     />
                   </label>
-                  <label style={stackStyle(6)}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>JQL override</span>
-                    <input
-                      style={inputStyle()}
-                      value={mappingModal.draft.jiraJql}
-                      placeholder="project = GRB AND statusCategory != Done ORDER BY updated DESC"
-                      onChange={(event) => setMappingModal((current) => current ? {
-                        ...current,
-                        draft: { ...current.draft, jiraJql: event.target.value }
-                      } : null)}
-                    />
-                  </label>
+                  {!isGitHubProviderType(selectedProvider?.type) ? (
+                    <label style={stackStyle(6)}>
+                      <span style={{ fontSize: 13, fontWeight: 600 }}>JQL override</span>
+                      <input
+                        style={inputStyle()}
+                        value={mappingModal.draft.jiraJql}
+                        placeholder="project = GRB AND statusCategory != Done ORDER BY updated DESC"
+                        onChange={(event) => setMappingModal((current) => current ? {
+                          ...current,
+                          draft: { ...current.draft, jiraJql: event.target.value }
+                        } : null)}
+                      />
+                    </label>
+                  ) : null}
                 </div>
-                <div style={{ fontSize: 12, opacity: 0.75 }}>
-                  JQL override behaves like an advanced filter. If left empty, the mapping uses the Jira project key plus the filters below.
-                </div>
+                {!isGitHubProviderType(selectedProvider?.type) ? (
+                  <div style={{ fontSize: 12, opacity: 0.75 }}>
+                    JQL override behaves like an advanced filter. If left empty, the mapping uses the Jira project key plus the filters below.
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 12, opacity: 0.75 }}>
+                    Use a GitHub repository URL or `owner/repo`. Filters below apply to the selected repository feed.
+                  </div>
+                )}
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
                   <label style={checkboxLabelStyle()}>
                     <input
@@ -2601,17 +2820,17 @@ function SyncCenterSurface(props: {
                             ...current.draft.filters,
                             onlyActive: event.target.checked
                           }
-                        }
-                      } : null)}
-                    />
-                    Sync only active Jira issues
+                      }
+                    } : null)}
+                  />
+                    {`Sync only active ${getProviderPlatformName(selectedProvider?.type)} issues`}
                   </label>
                   <JiraUserAutocomplete
                     companyId={companyId}
                     providerId={selectedProvider?.id ?? null}
                     label="Creator"
                     value={mappingModal.draft.filters.author ?? null}
-                    placeholder="Search Jira users"
+                    placeholder={getProviderUsersPlaceholder(selectedProvider?.type)}
                     onChange={(user) => setMappingModal((current) => current ? {
                       ...current,
                       draft: {
@@ -2628,7 +2847,7 @@ function SyncCenterSurface(props: {
                     providerId={selectedProvider?.id ?? null}
                     label="Assignee"
                     value={mappingModal.draft.filters.assignee ?? null}
-                    placeholder="Search Jira users"
+                    placeholder={getProviderUsersPlaceholder(selectedProvider?.type)}
                     onChange={(user) => setMappingModal((current) => current ? {
                       ...current,
                       draft: {
@@ -2767,7 +2986,7 @@ function SyncCenterSurface(props: {
                     <input
                       style={inputStyle()}
                       value={cleanupModal.customFilter}
-                      placeholder="Filter by Jira key, title, or Paperclip status"
+                      placeholder="Filter by upstream key, title, or Paperclip status"
                       onChange={(event) => {
                         const nextFilter = event.target.value;
                         setCleanupModal((current) => {
@@ -2792,7 +3011,7 @@ function SyncCenterSurface(props: {
                   ) : null}
                 </div>
                 <div style={{ fontSize: 12, opacity: 0.72 }}>
-                  Select the imported issues you want to hide. This only hides them in Paperclip and leaves the upstream Jira issues unchanged.
+                  Select the imported issues you want to hide. This only hides them in Paperclip and leaves the upstream issues unchanged.
                 </div>
                 <div style={{ display: 'grid', gap: 8, maxHeight: 320, overflowY: 'auto' }}>
                   {visibleCleanupCandidates.length === 0 ? (
@@ -2944,23 +3163,19 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
     <div style={stackStyle(14)}>
         <div style={rowStyle()}>
           <h3 style={{ margin: 0 }}>Issue Sync</h3>
-          <span style={badgeStyle(detail.data.isSynced ? 'synced' : 'local')}>
+          <div style={{ fontSize: 13, opacity: 0.78 }}>
             {detail.data.isSynced ? 'Synced issue' : 'Pure Paperclip issue'}
-          </span>
-          {detail.data.providerKey ? (
-            <span style={badgeStyle('info')}>Provider: {detail.data.providerKey}</span>
-          ) : null}
-          {detail.data.upstreamIssueKey ? (
-            <span style={badgeStyle('info')}>{detail.data.upstreamIssueKey}</span>
-          ) : null}
+            {detail.data.providerKey ? `, Provider: ${getProviderTypeLabel(detail.data.providerKey)}` : ''}
+            {detail.data.upstreamIssueKey ? `, ${detail.data.upstreamIssueKey}` : ''}
+          </div>
         </div>
 
         <div style={panelStyle(detail.data.isSynced ? 'synced' : 'local')}>
           <div style={stackStyle(10)}>
             <div style={{ fontSize: 13, opacity: 0.82 }}>
               {detail.data.isSynced
-                ? 'This issue is linked to Jira. Paperclip workflow status stays local, while Jira status is shown separately below.'
-                : 'This issue is still Paperclip-only. Create it in Jira when you want to start syncing upstream.'}
+                ? `This issue is linked to ${getProviderPlatformName(detail.data.providerKey)}. Paperclip workflow status stays local, while ${getProviderPlatformName(detail.data.providerKey)} issue status is shown separately below.`
+                : `This issue is still Paperclip-only. Create it in ${getProviderPlatformName(detail.data.providerKey)} when you want to start syncing upstream.`}
             </div>
             {detail.data.titlePrefix ? (
               <div style={{ fontSize: 12, opacity: 0.75 }}>
@@ -2970,14 +3185,14 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
             {detail.data.isSynced ? (
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
                 <div style={panelStyle()}>
-                  <div style={{ fontSize: 12, opacity: 0.7 }}>Upstream Jira status</div>
+                  <div style={{ fontSize: 12, opacity: 0.7 }}>Status</div>
                   {detail.data.upstreamStatus ? (
                     <div style={stackStyle(6)}>
                       {detail.data.upstreamTransitions && detail.data.upstreamTransitions.length > 0 ? (
                         <select
                           style={inputStyle()}
                           disabled={!companyId || !issueId || setUpstreamStatus.busy}
-                          value=""
+                          value={getProviderIssueSelectValue(detail.data.providerKey, detail.data.upstreamStatus.name)}
                           onChange={(event) => {
                             if (!event.target.value) {
                               return;
@@ -2986,10 +3201,16 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
                               companyId,
                               issueId,
                               transitionId: event.target.value
-                            }).then(() => detail.refresh());
+                            }).then((result) => {
+                              if (result) {
+                                void detail.refresh();
+                              }
+                            });
                           }}
                         >
-                          <option value="">{`${detail.data.upstreamStatus.name} (${detail.data.upstreamStatus.category})`}</option>
+                          {!isGitHubProviderType(detail.data.providerKey) ? (
+                            <option value="">{`${detail.data.upstreamStatus.name} (${detail.data.upstreamStatus.category})`}</option>
+                          ) : null}
                           {detail.data.upstreamTransitions.map((transition) => (
                             <option key={transition.id} value={transition.id}>{transition.name}</option>
                           ))}
@@ -3001,15 +3222,16 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
                   ) : 'Not linked yet'}
                 </div>
                 <div style={panelStyle()}>
-                  <div style={{ fontSize: 12, opacity: 0.7 }}>Upstream Jira assignee</div>
+                  <div style={{ fontSize: 12, opacity: 0.7 }}>Assignee</div>
                   <div style={stackStyle(8)}>
                     <JiraUserAutocomplete
                       companyId={companyId}
                       providerId={detail.data.upstreamProviderId ?? null}
                       label="Assignee"
+                      hideLabel
                       value={upstreamAssigneeDraft}
                       disabled={!companyId || !issueId || !detail.data.upstreamProviderId || setUpstreamAssignee.busy}
-                      placeholder={detail.data.upstream?.jiraAssigneeDisplayName ?? 'Search Jira users'}
+                      placeholder={detail.data.upstream?.jiraAssigneeDisplayName ?? getProviderUsersPlaceholder(detail.data.providerKey)}
                       onChange={(user) => {
                         setUpstreamAssigneeDraft(user);
                         if (!user) {
@@ -3019,28 +3241,29 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
                           companyId,
                           issueId,
                           assignee: user
-                        }).then(() => detail.refresh());
+                        }).then((result) => {
+                          if (result) {
+                            void detail.refresh();
+                          }
+                        });
                       }}
                     />
-                    <span style={{ fontSize: 12, opacity: 0.72 }}>
-                      Current: {detail.data.upstream?.jiraAssigneeDisplayName ?? 'Unassigned'}
-                    </span>
                   </div>
                 </div>
                 <div style={panelStyle()}>
-                  <div style={{ fontSize: 12, opacity: 0.7 }}>Upstream Jira creator</div>
-                  <strong>{detail.data.upstream?.jiraCreatorDisplayName ?? 'Unknown'}</strong>
+                  <div style={{ fontSize: 12, opacity: 0.7 }}>Creator</div>
+                  <span style={{ fontSize: 13 }}>{detail.data.upstream?.jiraCreatorDisplayName ?? 'Unknown'}</span>
                 </div>
               </div>
             ) : detail.data.mapping ? (
               <div style={panelStyle()}>
-                <div style={{ fontSize: 12, opacity: 0.7 }}>Target Jira project</div>
-                <strong>{detail.data.mapping.jiraProjectKey}</strong>
+                <div style={{ fontSize: 12, opacity: 0.7 }}>{getProviderProjectLabel(detail.data.providerKey)}</div>
+                <span style={{ fontSize: 13 }}>{detail.data.mapping.jiraProjectKey}</span>
               </div>
             ) : null}
             {detail.data.mapping ? (
               <div style={{ fontSize: 13, opacity: 0.78 }}>
-                Paperclip project <strong>{detail.data.mapping.paperclipProjectName}</strong> maps to Jira project <strong>{detail.data.mapping.jiraProjectKey}</strong>.
+                Paperclip project <strong>{detail.data.mapping.paperclipProjectName}</strong> maps to {getProviderProjectLabel(detail.data.providerKey).toLowerCase()} <strong>{detail.data.mapping.jiraProjectKey}</strong>.
               </div>
             ) : null}
             {detail.data.upstream ? (
@@ -3077,14 +3300,18 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
                 alignItems: 'center'
               }}
             >
-              {buttonLabel('external', 'Open in Jira')}
+              {buttonLabel('external', getOpenInProviderLabel(detail.data.providerKey))}
             </a>
           ) : null}
           <button
             type="button"
             style={buttonStyle('primary')}
             disabled={!companyId || !issueId || pushIssue.busy}
-            onClick={() => void pushIssue.run({ companyId, issueId }).then(() => detail.refresh())}
+            onClick={() => void pushIssue.run({ companyId, issueId }).then((result) => {
+              if (result) {
+                void detail.refresh();
+              }
+            })}
           >
             {buttonLabel(
               'arrow-up',
@@ -3099,9 +3326,13 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
             type="button"
             style={buttonStyle()}
             disabled={!detail.data.isSynced || !companyId || !issueId || pullIssue.busy}
-            onClick={() => void pullIssue.run({ companyId, issueId }).then(() => detail.refresh())}
+            onClick={() => void pullIssue.run({ companyId, issueId }).then((result) => {
+              if (result) {
+                void detail.refresh();
+              }
+            })}
           >
-            {buttonLabel('arrow-down', pullIssue.busy ? 'Pulling…' : 'Pull from Jira')}
+            {buttonLabel('arrow-down', getPullFromProviderLabel(detail.data.providerKey, pullIssue.busy))}
           </button>
         </div>
 
@@ -3109,7 +3340,7 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
           <div style={panelStyle('default')}>
             <div style={stackStyle(12)}>
               <div style={rowStyle()}>
-                <strong>Jira comments</strong>
+                <strong>{getProviderCommentsLabel(detail.data.providerKey)}</strong>
                 <span style={{ fontSize: 12, opacity: 0.72 }}>
                   {detail.data.upstreamComments?.length ?? 0} total
                 </span>
@@ -3145,7 +3376,7 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
                     ))
                   ) : (
                     <div style={{ fontSize: 12, opacity: 0.72 }}>
-                      No Jira comments are available yet.
+                      No {getProviderCommentsLabel(detail.data.providerKey).toLowerCase()} are available yet.
                     </div>
                   )}
                 </div>
@@ -3159,7 +3390,7 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
             <div style={stackStyle(12)}>
               <div style={rowStyle()}>
                 <strong>Post new comment</strong>
-                <span style={{ fontSize: 12, opacity: 0.72 }}>Posts to Jira</span>
+                <span style={{ fontSize: 12, opacity: 0.72 }}>{getProviderPostsLabel(detail.data.providerKey)}</span>
               </div>
               <textarea
                 style={{
@@ -3168,7 +3399,7 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
                   resize: 'vertical'
                 }}
                 value={commentBody}
-                placeholder="Add a comment to this Jira issue"
+                placeholder={getProviderCommentPlaceholder(detail.data.providerKey)}
                 onChange={(event) => setCommentBody(event.target.value)}
               />
               <div style={rowStyle()}>
@@ -3181,9 +3412,11 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
                       companyId,
                       issueId,
                       body: commentBody
-                    }).then(() => {
-                      setCommentBody('');
-                      void detail.refresh();
+                    }).then((result) => {
+                      if (result) {
+                        setCommentBody('');
+                        void detail.refresh();
+                      }
                     });
                   }}
                 >
@@ -3235,10 +3468,10 @@ export function JiraSyncCommentAnnotation(): React.JSX.Element {
               : 'synced'
         )}
         >
-          {annotation.data.badgeLabel ?? buildCommentOriginLabel(annotation.data.origin)}
+          {annotation.data.badgeLabel ?? buildCommentOriginLabel(annotation.data.origin, annotation.data.providerKey)}
         </span>
         <span style={{ fontSize: 12, opacity: 0.78 }}>
-          {buildCommentOriginLabel(annotation.data.origin)}
+          {buildCommentOriginLabel(annotation.data.origin, annotation.data.providerKey)}
         </span>
         {annotation.data.jiraIssueKey ? (
           <span style={badgeStyle('info')}>{annotation.data.jiraIssueKey}</span>
@@ -3264,9 +3497,13 @@ export function JiraSyncCommentAnnotation(): React.JSX.Element {
             type="button"
             style={buttonStyle('secondary')}
             disabled={!companyId || !issueId || !commentId || pushComment.busy}
-            onClick={() => void pushComment.run({ companyId, issueId, commentId }).then(() => annotation.refresh())}
+            onClick={() => void pushComment.run({ companyId, issueId, commentId }).then((result) => {
+              if (result) {
+                void annotation.refresh();
+              }
+            })}
           >
-            {buttonLabel('arrow-up', pushComment.busy ? 'Uploading…' : 'Upload comment to Jira')}
+            {buttonLabel('arrow-up', pushComment.busy ? 'Uploading…' : `Upload comment to ${getProviderPlatformName(annotation.data.providerKey)}`)}
           </button>
         </div>
       ) : null}
@@ -3282,7 +3519,7 @@ export function JiraSyncCommentAnnotation(): React.JSX.Element {
             alignItems: 'center'
           }}
         >
-          {buttonLabel('external', 'Open in Jira')}
+          {buttonLabel('external', getOpenInProviderLabel(annotation.data.providerKey))}
         </a>
       ) : null}
       <ResultMessage

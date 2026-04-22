@@ -5,6 +5,7 @@ import { createTestHarness } from '@paperclipai/plugin-sdk/testing';
 
 import manifest from '../src/manifest.ts';
 import plugin from '../src/worker.ts';
+import { normalizeProviderConfig, serializeProviderConfigForHost } from '../src/providers/shared/config.ts';
 import { buildCommentOriginLabel, buildSyncProgressLabel } from '../src/ui/index.tsx';
 
 type MockFetchHandler = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -171,10 +172,48 @@ test('manifest keeps sync launchers on project and issue surfaces only', async (
   assert.equal(manifest.displayName, 'Issue Sync');
   assert.ok(manifest.ui?.slots?.some((slot) => slot.type === 'settingsPage'));
   assert.ok((manifest.instanceConfigSchema as any)?.properties?.jiraToken);
+  assert.deepEqual(
+    (manifest.instanceConfigSchema as any)?.properties?.providers?.items?.properties?.type?.enum,
+    ['jira', 'jira_dc', 'jira_cloud', 'github_issues']
+  );
   assert.equal(manifest.ui?.launchers?.length, 1);
   assert.equal(manifest.ui?.launchers?.[0]?.id, 'paperclip-jira-plugin-entity-launcher');
   assert.equal(manifest.ui?.launchers?.[0]?.placementZone, 'toolbarButton');
   assert.deepEqual(manifest.ui?.launchers?.[0]?.entityTypes, ['project']);
+});
+
+test('provider config compatibility serializer keeps multi-provider records readable through legacy host schemas', async () => {
+  const serializedGitHub = serializeProviderConfigForHost({
+    id: 'provider-github',
+    type: 'github_issues',
+    name: 'GitHub',
+    githubApiBaseUrl: 'https://api.github.com',
+    githubToken: 'token',
+    defaultRepository: 'owner/repo'
+  });
+  const serializedJiraCloud = serializeProviderConfigForHost({
+    id: 'provider-cloud',
+    type: 'jira_cloud',
+    name: 'Jira Cloud',
+    jiraBaseUrl: 'https://example.atlassian.net',
+    jiraToken: 'token',
+    defaultIssueType: 'Task'
+  });
+
+  assert.equal(serializedGitHub.type, 'jira');
+  assert.equal(serializedGitHub.providerKind, 'github_issues');
+  assert.equal(normalizeProviderConfig(serializedGitHub)?.type, 'github_issues');
+  assert.equal(normalizeProviderConfig({
+    id: 'provider-github-fallback',
+    type: 'jira',
+    name: 'GitHub fallback',
+    githubApiBaseUrl: 'https://api.github.com',
+    githubToken: 'token'
+  })?.type, 'github_issues');
+
+  assert.equal(serializedJiraCloud.type, 'jira');
+  assert.equal(serializedJiraCloud.providerKind, 'jira_cloud');
+  assert.equal(normalizeProviderConfig(serializedJiraCloud)?.type, 'jira_cloud');
 });
 
 test('settings save keeps mappings scoped per company', async () => {
@@ -492,6 +531,64 @@ test('sync.provider.testConnection records provider test status', async () => {
   }
 });
 
+test('provider directory only marks the tested provider as connected', async () => {
+  const restoreFetch = installMockFetch(async (input) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/rest/api/2/myself')) {
+      return jsonResponse({
+        accountId: 'user-1',
+        displayName: 'Paperclip User'
+      });
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  try {
+    const harness = createTestHarness({
+      manifest,
+      config: {
+        providers: [
+          {
+            id: 'provider-jira',
+            type: 'jira_dc',
+            name: 'Oracle Jira',
+            jiraBaseUrl: 'https://jira.example.com',
+            jiraToken: 'jira-token'
+          },
+          {
+            id: 'provider-github',
+            type: 'github_issues',
+            name: 'GitHub',
+            githubApiBaseUrl: 'https://api.github.com',
+            githubToken: 'github-token'
+          }
+        ]
+      } as any
+    });
+    await plugin.definition.setup(harness.ctx);
+
+    await harness.performAction('sync.provider.testConnection', {
+      companyId: 'company-1',
+      providerId: 'provider-jira',
+      providerKey: 'jira_dc'
+    });
+
+    const providerDirectory = await harness.getData<{
+      providers: Array<{ providerId: string; status?: string; healthLabel?: string }>;
+    }>('settings.providerDirectory', {
+      companyId: 'company-1'
+    });
+
+    assert.equal(providerDirectory.providers.find((provider) => provider.providerId === 'provider-jira')?.status, 'connected');
+    assert.equal(providerDirectory.providers.find((provider) => provider.providerId === 'provider-jira')?.healthLabel, 'Connected');
+    assert.equal(providerDirectory.providers.find((provider) => provider.providerId === 'provider-github')?.status, 'not_tested');
+    assert.equal(providerDirectory.providers.find((provider) => provider.providerId === 'provider-github')?.healthLabel, 'Not tested');
+  } finally {
+    restoreFetch();
+  }
+});
+
 test('settings and popup data do not resolve Jira secrets just to render provider state', async () => {
   const harness = createTestHarness({
     manifest,
@@ -727,6 +824,72 @@ test('sync.project.refreshIdentity returns a structured Jira user reference', as
       displayName: 'Paperclip User',
       emailAddress: 'paperclip@example.com'
     });
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('sync.project.refreshIdentity returns a structured GitHub user reference', async () => {
+  const restoreFetch = installMockFetch(async (input) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/user')) {
+      return jsonResponse({
+        login: 'andriy-dmytruk'
+      });
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  try {
+    const harness = createTestHarness({
+      manifest,
+      config: {
+        providers: [
+          {
+            id: 'provider-github',
+            type: 'jira',
+            providerKind: 'github_issues',
+            name: 'GitHub',
+            githubApiBaseUrl: 'https://api.github.com',
+            githubToken: 'github-token'
+          }
+        ]
+      } as any
+    });
+    await plugin.definition.setup(harness.ctx);
+
+    harness.seed({
+      projects: [makeProject()]
+    });
+
+    await harness.performAction('settings.saveRegistration', {
+      companyId: 'company-1',
+      projectId: 'project-1',
+      projectName: 'Alpha',
+      providerId: 'provider-github',
+      mappings: []
+    });
+
+    const result = await harness.performAction<{
+      defaultAssignee?: {
+        accountId: string;
+        displayName: string;
+        username?: string;
+      } | null;
+      message?: string;
+    }>('sync.project.refreshIdentity', {
+      companyId: 'company-1',
+      projectId: 'project-1',
+      providerId: 'provider-github'
+    });
+
+    assert.deepEqual(result.defaultAssignee, {
+      accountId: 'andriy-dmytruk',
+      displayName: 'andriy-dmytruk',
+      username: 'andriy-dmytruk'
+    });
+    assert.match(result.message ?? '', /Loaded GitHub user/);
   } finally {
     restoreFetch();
   }
@@ -969,12 +1132,81 @@ test('sync.runNow imports Jira issues into mapped Paperclip projects', async () 
       companyId: 'company-1',
       projectId: 'project-1'
     });
+    const providerDirectory = await harness.getData<{
+      providers: Array<{ providerId: string; status?: string; healthLabel?: string; healthMessage?: string }>;
+    }>('settings.providerDirectory', {
+      companyId: 'company-1'
+    });
 
     assert.equal(syncState.status, 'success');
     assert.equal(syncState.importedCount, 1);
     assert.equal(importedIssues.length, 1);
     assert.match(importedIssues[0]?.description ?? '', /paperclip-jira-plugin-upstream: GRB-461/);
     assert.equal(importedIssues[0]?.status, 'todo');
+    assert.equal(providerDirectory.providers[0]?.status, 'connected');
+    assert.equal(providerDirectory.providers[0]?.healthLabel, 'Connected');
+    assert.match(providerDirectory.providers[0]?.healthMessage ?? '', /Last sync succeeded/);
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('sync.runNow marks provider health as degraded when upstream search fails', async () => {
+  const restoreFetch = installMockFetch(async (input) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/rest/api/2/search')) {
+      return jsonResponse({
+        errorMessages: ['Boom']
+      }, 502);
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  try {
+    const harness = createTestHarness({
+      manifest,
+      config: {
+        jiraBaseUrl: 'https://jira.example.com',
+        jiraUserEmail: 'paperclip@example.com',
+        jiraTokenRef: 'secret:jira'
+      }
+    });
+    await plugin.definition.setup(harness.ctx);
+
+    harness.seed({
+      projects: [
+        makeProject()
+      ]
+    });
+
+    await harness.performAction('settings.saveRegistration', {
+      companyId: 'company-1',
+      projectId: 'project-1',
+      projectName: 'Alpha',
+      providerId: 'provider-default-jira',
+      mappings: [
+        {
+          jiraProjectKey: 'GRB',
+          paperclipProjectId: 'project-1',
+          paperclipProjectName: 'Alpha'
+        }
+      ]
+    });
+
+    const syncState = await harness.performAction<{ status: string; message?: string }>('sync.runNow', {
+      companyId: 'company-1'
+    });
+    const providerDirectory = await harness.getData<{
+      providers: Array<{ providerId: string; status?: string; healthLabel?: string; healthMessage?: string }>;
+    }>('settings.providerDirectory', {
+      companyId: 'company-1'
+    });
+
+    assert.equal(syncState.status, 'error');
+    assert.equal(providerDirectory.providers[0]?.status, 'degraded');
+    assert.equal(providerDirectory.providers[0]?.healthLabel, 'Degraded');
+    assert.ok(providerDirectory.providers[0]?.healthMessage);
   } finally {
     restoreFetch();
   }
@@ -1296,6 +1528,87 @@ test('sync.runNow applies the default Jira-to-Paperclip status mapping when no e
     assert.equal(detail.localStatus, 'todo');
     assert.equal(detail.upstream?.jiraStatusName, 'In Progress');
     assert.equal(detail.upstream?.jiraStatusCategory, 'In Progress');
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('sync.runNow maps closed GitHub issues to done by default', async () => {
+  const restoreFetch = installMockFetch(async (input) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/repos/ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO/issues?state=all&per_page=50')) {
+      return jsonResponse([
+        {
+          id: 1,
+          number: 1,
+          title: 'Closed GitHub issue',
+          body: 'Imported from GitHub',
+          state: 'closed',
+          html_url: 'https://github.com/ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO/issues/1',
+          user: {
+            login: 'andriy-dmytruk'
+          },
+          created_at: '2026-04-21T13:03:54.000Z',
+          updated_at: '2026-04-21T13:08:38.000Z'
+        }
+      ]);
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  try {
+    const harness = createTestHarness({
+      manifest,
+      config: {
+        providers: [
+          {
+            id: 'provider-github',
+            type: 'github_issues',
+            name: 'GitHub',
+            githubApiBaseUrl: 'https://api.github.com',
+            githubToken: 'github-token'
+          }
+        ]
+      } as any
+    });
+    await plugin.definition.setup(harness.ctx);
+
+    harness.seed({
+      projects: [makeProject()]
+    });
+
+    await harness.performAction('sync.project.save', {
+      companyId: 'company-1',
+      projectId: 'project-1',
+      projectName: 'Alpha',
+      providerId: 'provider-github',
+      scheduleFrequencyMinutes: 15,
+      mappings: [
+        {
+          id: 'mapping-1',
+          providerId: 'provider-github',
+          jiraProjectKey: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO',
+          paperclipProjectId: 'project-1',
+          paperclipProjectName: 'Alpha'
+        }
+      ]
+    });
+
+    const syncState = await harness.performAction<{ status: string }>('sync.runNow', {
+      companyId: 'company-1',
+      projectId: 'project-1'
+    });
+
+    const importedIssues = await harness.ctx.issues.list({
+      companyId: 'company-1',
+      projectId: 'project-1'
+    });
+
+    assert.equal(syncState.status, 'success');
+    assert.equal(importedIssues.length, 1);
+    assert.equal(importedIssues[0]?.status, 'done');
+    assert.equal(importedIssues[0]?.title, '[ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1] Closed GitHub issue');
   } finally {
     restoreFetch();
   }
@@ -1949,6 +2262,111 @@ test('issue.setUpstreamAssignee updates the Jira assignee and refreshes upstream
     assert.match(result.message, /Updated upstream assignee to New Owner/);
     assert.equal(presentation.upstream?.jiraAssigneeDisplayName, 'New Owner');
     assert.equal(presentation.upstream?.jiraCreatorDisplayName, 'Issue Creator');
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('issue.setUpstreamAssignee surfaces GitHub assignment validation failures', async () => {
+  const restoreFetch = installMockFetch(async (input, init) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/repos/ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO/issues/1') && init?.method === 'PATCH') {
+      return jsonResponse({
+        message: 'Validation Failed',
+        errors: [{
+          field: 'assignees',
+          code: 'invalid',
+          message: 'Could not resolve to a user with access to this repository.'
+        }]
+      }, 422);
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  try {
+    const harness = createTestHarness({
+      manifest,
+      config: {
+        providers: [
+          {
+            id: 'provider-github',
+            type: 'github_issues',
+            name: 'GitHub',
+            githubApiBaseUrl: 'https://api.github.com',
+            githubToken: 'github-token'
+          }
+        ]
+      } as any
+    });
+    await plugin.definition.setup(harness.ctx);
+
+    harness.seed({
+      projects: [makeProject()],
+      issues: [
+        makeIssue({
+          id: 'issue-1',
+          title: '[ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1] Local Paperclip issue',
+          description: 'Local body\n\n<!-- paperclip-jira-plugin-upstream: ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1 -->'
+        })
+      ]
+    });
+
+    await harness.performAction('sync.project.save', {
+      companyId: 'company-1',
+      projectId: 'project-1',
+      projectName: 'Alpha',
+      providerId: 'provider-github',
+      scheduleFrequencyMinutes: 15,
+      mappings: [
+        {
+          id: 'mapping-1',
+          providerId: 'provider-github',
+          jiraProjectKey: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO',
+          paperclipProjectId: 'project-1',
+          paperclipProjectName: 'Alpha'
+        }
+      ]
+    });
+
+    await harness.ctx.entities.upsert({
+      entityType: 'paperclip-jira-plugin.issue-link',
+      scopeKind: 'issue',
+      scopeId: 'issue-1',
+      externalId: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1',
+      title: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1',
+      status: 'Open',
+      data: {
+        issueId: 'issue-1',
+        companyId: 'company-1',
+        projectId: 'project-1',
+        providerId: 'provider-github',
+        jiraIssueId: '1',
+        jiraIssueKey: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1',
+        jiraProjectKey: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO',
+        jiraUrl: 'https://github.com/ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO/issues/1',
+        jiraStatusName: 'Open',
+        jiraStatusCategory: 'Open',
+        lastSyncedAt: '2026-04-21T13:08:38.000Z',
+        source: 'jira'
+      }
+    });
+
+    await assert.rejects(
+      async () => await harness.performAction('issue.setUpstreamAssignee', {
+        companyId: 'company-1',
+        params: {
+          companyId: 'company-1',
+          issueId: 'issue-1',
+          assignee: {
+            accountId: 'andriy-dmytruk',
+            displayName: 'andriy-dmytruk',
+            username: 'andriy-dmytruk'
+          }
+        }
+      } as any),
+      /GitHub request failed \(422\).*assignees: invalid: Could not resolve to a user with access to this repository\..*selected assignee cannot be assigned to this repository/i
+    );
   } finally {
     restoreFetch();
   }
@@ -2650,6 +3068,245 @@ test('issue.comment.submit always publishes synced issue comments to Jira', asyn
   }
 });
 
+test('issue.comment.submit preserves the local comment and surfaces GitHub permission failures', async () => {
+  const restoreFetch = installMockFetch(async (input, init) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/repos/ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO/issues/1/comments') && init?.method === 'POST') {
+      return jsonResponse({
+        message: 'Resource not accessible by personal access token'
+      }, 403);
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  try {
+    const harness = createTestHarness({
+      manifest,
+      config: {
+        providers: [
+          {
+            id: 'provider-github',
+            type: 'github_issues',
+            name: 'GitHub',
+            githubApiBaseUrl: 'https://api.github.com',
+            githubToken: 'github-token'
+          }
+        ]
+      } as any
+    });
+    await plugin.definition.setup(harness.ctx);
+
+    harness.seed({
+      projects: [makeProject()],
+      issues: [
+        makeIssue({
+          id: 'issue-1',
+          title: '[ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1] Local Paperclip issue',
+          description: 'Local body\n\n<!-- paperclip-jira-plugin-upstream: ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1 -->'
+        })
+      ]
+    });
+
+    await harness.performAction('sync.project.save', {
+      companyId: 'company-1',
+      projectId: 'project-1',
+      projectName: 'Alpha',
+      providerId: 'provider-github',
+      scheduleFrequencyMinutes: 15,
+      mappings: [
+        {
+          id: 'mapping-1',
+          providerId: 'provider-github',
+          jiraProjectKey: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO',
+          paperclipProjectId: 'project-1',
+          paperclipProjectName: 'Alpha'
+        }
+      ]
+    });
+
+    await harness.ctx.entities.upsert({
+      entityType: 'paperclip-jira-plugin.issue-link',
+      scopeKind: 'issue',
+      scopeId: 'issue-1',
+      externalId: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1',
+      title: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1',
+      status: 'Open',
+      data: {
+        issueId: 'issue-1',
+        companyId: 'company-1',
+        projectId: 'project-1',
+        providerId: 'provider-github',
+        jiraIssueId: '1',
+        jiraIssueKey: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1',
+        jiraProjectKey: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO',
+        jiraUrl: 'https://github.com/ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO/issues/1',
+        jiraStatusName: 'Open',
+        jiraStatusCategory: 'Open',
+        lastSyncedAt: '2026-04-21T13:08:38.000Z',
+        source: 'jira'
+      }
+    });
+
+    await assert.rejects(
+      async () => await harness.performAction('issue.comment.submit', {
+        companyId: 'company-1',
+        params: {
+          companyId: 'company-1',
+          issueId: 'issue-1',
+          body: 'Publish this upstream too'
+        }
+      } as any),
+      /Created the comment in Paperclip, but GitHub publishing failed: GitHub request failed \(403\)\. Resource not accessible by personal access token.*Personal Access Token can write issues for this repository/i
+    );
+
+    const comments = await harness.ctx.issues.listComments('issue-1', 'company-1');
+    assert.equal(comments.length, 1);
+    assert.equal(comments[0]?.body, 'Publish this upstream too');
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('issue sync presentation loads GitHub upstream comments', async () => {
+  const restoreFetch = installMockFetch(async (input) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/repos/ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO/issues/1')) {
+      return jsonResponse({
+        id: 1,
+        number: 1,
+        title: 'GitHub issue',
+        body: 'Imported from GitHub',
+        state: 'open',
+        html_url: 'https://github.com/ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO/issues/1',
+        assignees: [{ login: 'andriy-dmytruk' }],
+        user: { login: 'octocat' },
+        created_at: '2026-04-21T13:03:54.000Z',
+        updated_at: '2026-04-21T13:08:38.000Z'
+      });
+    }
+    if (url.endsWith('/repos/ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO/issues/1/comments?per_page=100')) {
+      return jsonResponse([
+        {
+          id: 101,
+          body: 'First GitHub comment',
+          user: { login: 'commenter-one' },
+          created_at: '2026-04-21T13:10:00.000Z',
+          updated_at: '2026-04-21T13:10:00.000Z'
+        },
+        {
+          id: 102,
+          body: 'Second GitHub comment',
+          user: { login: 'commenter-two' },
+          created_at: '2026-04-21T13:11:00.000Z',
+          updated_at: '2026-04-21T13:11:00.000Z'
+        }
+      ]);
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  try {
+    const harness = createTestHarness({
+      manifest,
+      config: {
+        providers: [
+          {
+            id: 'provider-github',
+            type: 'github_issues',
+            name: 'GitHub',
+            githubApiBaseUrl: 'https://api.github.com',
+            githubToken: 'github-token'
+          }
+        ]
+      } as any
+    });
+    await plugin.definition.setup(harness.ctx);
+
+    harness.seed({
+      projects: [makeProject()],
+      issues: [
+        makeIssue({
+          id: 'issue-1',
+          title: '[ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1] Local Paperclip issue',
+          description: 'Local body\n\n<!-- paperclip-jira-plugin-upstream: ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1 -->'
+        })
+      ]
+    });
+
+    await harness.performAction('sync.project.save', {
+      companyId: 'company-1',
+      projectId: 'project-1',
+      projectName: 'Alpha',
+      providerId: 'provider-github',
+      scheduleFrequencyMinutes: 15,
+      mappings: [
+        {
+          id: 'mapping-1',
+          providerId: 'provider-github',
+          jiraProjectKey: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO',
+          paperclipProjectId: 'project-1',
+          paperclipProjectName: 'Alpha'
+        }
+      ]
+    });
+
+    await harness.ctx.entities.upsert({
+      entityType: 'paperclip-jira-plugin.issue-link',
+      scopeKind: 'issue',
+      scopeId: 'issue-1',
+      externalId: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1',
+      title: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1',
+      status: 'Open',
+      data: {
+        issueId: 'issue-1',
+        companyId: 'company-1',
+        projectId: 'project-1',
+        providerId: 'provider-github',
+        jiraIssueId: '1',
+        jiraIssueKey: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1',
+        jiraProjectKey: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO',
+        jiraUrl: 'https://github.com/ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO/issues/1',
+        jiraStatusName: 'Open',
+        jiraStatusCategory: 'Open',
+        lastSyncedAt: '2026-04-21T13:08:38.000Z',
+        source: 'jira'
+      }
+    });
+
+    const presentation = await harness.getData<{
+      upstream?: {
+        jiraCreatorDisplayName?: string;
+      };
+      upstreamComments?: Array<{ id: string; authorDisplayName: string; body: string }>;
+    }>('issue.syncPresentation', {
+      companyId: 'company-1',
+      issueId: 'issue-1'
+    });
+
+    assert.equal(presentation.upstream?.jiraCreatorDisplayName, 'octocat');
+    assert.deepEqual(presentation.upstreamComments ?? [], [
+      {
+        id: '101',
+        authorDisplayName: 'commenter-one',
+        body: 'First GitHub comment',
+        createdAt: '2026-04-21T13:10:00.000Z',
+        updatedAt: '2026-04-21T13:10:00.000Z'
+      },
+      {
+        id: '102',
+        authorDisplayName: 'commenter-two',
+        body: 'Second GitHub comment',
+        createdAt: '2026-04-21T13:11:00.000Z',
+        updatedAt: '2026-04-21T13:11:00.000Z'
+      }
+    ]);
+  } finally {
+    restoreFetch();
+  }
+});
+
 test('issue sync presentation falls back to reporter when Jira creator is not present', async () => {
   const restoreFetch = installMockFetch(async (input, init) => {
     const url = typeof input === 'string' ? input : input.toString();
@@ -2870,6 +3527,175 @@ test('sync.findCleanupCandidates ignores hidden imported issues', async () => {
   assert.equal(result.candidates.length, 0);
 });
 
+test('sync.findCleanupCandidates includes untouched imported GitHub issues', async () => {
+  const restoreFetch = installMockFetch(async (input) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/repos/ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO/issues?state=all&per_page=50')) {
+      return jsonResponse([
+        {
+          id: 1,
+          number: 1,
+          title: 'Imported GitHub issue',
+          body: 'Imported from GitHub',
+          state: 'open',
+          html_url: 'https://github.com/ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO/issues/1',
+          user: {
+            login: 'andriy-dmytruk'
+          },
+          created_at: '2026-04-21T13:03:54.000Z',
+          updated_at: '2026-04-21T13:08:38.000Z'
+        }
+      ]);
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  try {
+    const harness = createTestHarness({
+      manifest,
+      config: {
+        providers: [
+          {
+            id: 'provider-github',
+            type: 'github_issues',
+            name: 'GitHub',
+            githubApiBaseUrl: 'https://api.github.com',
+            githubToken: 'github-token'
+          }
+        ]
+      } as any
+    });
+    await plugin.definition.setup(harness.ctx);
+
+    harness.seed({
+      projects: [makeProject()]
+    });
+
+    await harness.performAction('sync.project.save', {
+      companyId: 'company-1',
+      projectId: 'project-1',
+      projectName: 'Alpha',
+      providerId: 'provider-github',
+      scheduleFrequencyMinutes: 15,
+      mappings: [
+        {
+          id: 'mapping-1',
+          providerId: 'provider-github',
+          jiraProjectKey: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO',
+          paperclipProjectId: 'project-1',
+          paperclipProjectName: 'Alpha'
+        }
+      ]
+    });
+
+    await harness.performAction('sync.runNow', {
+      companyId: 'company-1',
+      projectId: 'project-1'
+    });
+
+    const result = await harness.performAction<{
+      count: number;
+      candidates: Array<{ issueId: string; jiraIssueKey: string; status: string }>;
+    }>('sync.findCleanupCandidates', {
+      companyId: 'company-1',
+      projectId: 'project-1'
+    });
+
+    assert.equal(result.count, 1);
+    assert.equal(result.candidates[0]?.jiraIssueKey, 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1');
+    assert.equal(result.candidates[0]?.status, 'todo');
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('sync.findCleanupCandidates still includes imported GitHub issues after local sync activity', async () => {
+  const harness = createTestHarness({
+    manifest,
+    config: {
+      providers: [
+        {
+          id: 'provider-github',
+          type: 'github_issues',
+          name: 'GitHub',
+          githubApiBaseUrl: 'https://api.github.com',
+          githubToken: 'github-token'
+        }
+      ]
+    } as any
+  });
+  await plugin.definition.setup(harness.ctx);
+
+  harness.seed({
+    projects: [makeProject()],
+    issues: [
+      makeIssue({
+        id: 'issue-github-import',
+        title: '[ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#2] Imported GitHub issue with local edits',
+        description: 'Locally tweaked body\n\n<!-- paperclip-jira-plugin-upstream: ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#2 -->',
+        status: 'in_progress'
+      })
+    ]
+  });
+
+  await harness.ctx.entities.upsert({
+    entityType: 'paperclip-jira-plugin.issue-link',
+    scopeKind: 'issue',
+    scopeId: 'issue-github-import',
+    externalId: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#2',
+    title: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#2',
+    status: 'Open',
+    data: {
+      issueId: 'issue-github-import',
+      companyId: 'company-1',
+      projectId: 'project-1',
+      providerId: 'provider-github',
+      jiraIssueId: '2',
+      jiraIssueKey: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#2',
+      jiraProjectKey: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO',
+      jiraUrl: 'https://github.com/ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO/issues/2',
+      jiraStatusName: 'Open',
+      jiraStatusCategory: 'Open',
+      lastSyncedAt: '2026-04-21T13:08:38.000Z',
+      lastPulledAt: '2026-04-21T13:08:38.000Z',
+      lastPushedAt: '2026-04-21T13:10:00.000Z',
+      source: 'jira',
+      importedTitleHash: 'stale-title-hash',
+      importedDescriptionHash: 'stale-description-hash'
+    }
+  });
+
+  await harness.ctx.state.set({
+    scopeKind: 'issue',
+    scopeId: 'issue-github-import',
+    stateKey: 'paperclip-jira-plugin-comment-links'
+  }, {
+    'comment-1': {
+      commentId: 'comment-1',
+      issueId: 'issue-github-import',
+      companyId: 'company-1',
+      jiraIssueKey: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#2',
+      jiraCommentId: '200',
+      direction: 'push',
+      lastSyncedAt: '2026-04-21T13:11:00.000Z'
+    }
+  });
+
+  const result = await harness.performAction<{
+    count: number;
+    candidates: Array<{ issueId: string; jiraIssueKey: string; status: string }>;
+  }>('sync.findCleanupCandidates', {
+    companyId: 'company-1',
+    projectId: 'project-1'
+  });
+
+  assert.equal(result.count, 1);
+  assert.equal(result.candidates[0]?.issueId, 'issue-github-import');
+  assert.equal(result.candidates[0]?.jiraIssueKey, 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#2');
+  assert.equal(result.candidates[0]?.status, 'in_progress');
+});
+
 test('issue sync presentation keeps a mapped local issue unsynced until it is linked', async () => {
   const harness = createTestHarness({
     manifest,
@@ -3002,5 +3828,6 @@ test('ui helper labels describe sync progress and comment origin', async () => {
     '2 of 5 issues processed'
   );
   assert.equal(buildCommentOriginLabel('provider_pull'), 'Fetched from Jira');
+  assert.equal(buildCommentOriginLabel('provider_pull', 'github_issues'), 'Fetched from GitHub');
   assert.equal(buildCommentOriginLabel('paperclip'), 'Local Paperclip comment');
 });

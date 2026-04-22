@@ -11,6 +11,8 @@ Issue Sync is a Paperclip plugin for synchronizing upstream issues into Papercli
 - The worker MUST read provider connection details from plugin config using saved provider records. Legacy single-provider Jira fields (`jiraBaseUrl`, `jiraUserEmail`, `jiraToken`, `jiraTokenRef`, `defaultIssueType`) SHOULD continue to work as a migration path.
 - The worker MUST NOT persist the raw Jira token in plugin state.
 - The sync center MUST support an explicit provider connection test, MUST keep an existing token hidden in the UI, and MUST allow creating or editing a provider on its own dedicated page with `Back` navigation instead of a nested popup.
+- Provider directory health MUST be tracked per provider, not only per company, so mixed-provider installs can show independent `Connected`, `Degraded`, `Not tested`, or `Needs config` states.
+- Successful provider tests and successful sync fetches SHOULD update provider health to `Connected`, while failed provider tests or failed upstream sync fetches SHOULD update provider health to `Degraded`.
 - The sync center MUST let a Paperclip project explicitly choose `Provider: None` without falling back to the first saved Jira provider.
 - Before a provider is selected for a project, the sync center MUST hide provider-specific project settings and sync actions while keeping `Hide imported issues` available.
 - The sync flow MUST import Jira issues into the selected Paperclip project's configured Jira mappings.
@@ -36,15 +38,16 @@ Issue Sync is a Paperclip plugin for synchronizing upstream issues into Papercli
 - Project default assignee and mapping author/assignee filters MUST use structured Jira user references keyed by durable Jira identity, not plain display text.
 - The worker MUST expose Jira current-user resolution and Jira user search so the hosted UI can drive project-default and mapping-user autocomplete.
 - The worker MUST expose typed provider interfaces and a registry so new providers can be added without changing the shared sync shell.
+- Provider config persistence SHOULD remain backward-compatible with older Paperclip host schemas by preserving the real provider type in plugin-owned provider metadata when needed.
 - Provider transports SHOULD prefer generated OpenAPI clients or official maintained SDKs when they exist.
 - Jira Data Center MUST continue using the checked-in generated OpenAPI client.
 - GitHub Issues integration SHOULD use the official Octokit client.
 - Jira-linked issue detail SHOULD surface both the upstream Jira assignee and the upstream Jira creator.
 - Jira-linked issue detail SHOULD refresh live Jira assignee, creator, status, and comments when the detail view loads so the UI does not depend only on stale cached link metadata.
 - The primary `Sync issues` action MUST save provider and project sync edits before running sync.
-- The settings surface SHOULD expose a `Hide imported issues` action that hides untouched imported Jira issues in Paperclip, regardless of whether their mapping is still configured.
+- The settings surface SHOULD expose a `Hide imported issues` action that hides imported upstream issues in Paperclip, regardless of whether their mapping is still configured or whether the import later participated in local sync activity.
 - The hide dialog SHOULD still open when there are zero matching imported issues so the empty state remains visible.
-- Hidden imported issues that later reappear in Jira SHOULD be restored by the next matching sync run instead of remaining hidden forever.
+- Hidden imported issues that later reappear upstream SHOULD be restored by the next matching sync run instead of remaining hidden forever.
 - The worker SHOULD support scheduled sync using a project-scoped frequency.
 
 ## Current transport choice

@@ -3,6 +3,7 @@ import {
   DEFAULT_JIRA_ISSUE_TYPE,
   PROVIDER_TYPE_OPTIONS,
   getProviderTypeLabel,
+  type PersistedProviderConfigInput,
   type ProviderConfig,
   type ProviderType
 } from '../providers/shared/config.ts';
@@ -38,7 +39,7 @@ export type JiraProviderConfig = ProviderConfig & {
 };
 
 export interface JiraPluginConfig {
-  providers?: JiraProviderConfig[];
+  providers?: Array<JiraProviderConfig | PersistedProviderConfigInput>;
   jiraBaseUrl?: string;
   jiraUserEmail?: string;
   jiraToken?: string;
