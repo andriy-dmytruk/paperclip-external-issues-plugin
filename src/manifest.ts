@@ -17,7 +17,7 @@ export const manifest: PaperclipPluginManifestV1 = {
   version: MANIFEST_VERSION,
   displayName: 'Issue Sync',
   description: 'Synchronize Jira issues into Paperclip projects and sync issue/comment changes both ways.',
-  author: 'Álvaro Sánchez-Mariscal',
+  author: 'Andriy Dmytruk',
   categories: ['connector', 'ui'],
   capabilities: [
     DASHBOARD_WIDGET_CAPABILITY,

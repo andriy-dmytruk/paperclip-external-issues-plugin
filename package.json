@@ -2,6 +2,10 @@
   "name": "paperclip-jira-plugin",
   "version": "0.1.0",
   "description": "Paperclip plugin for synchronizing Jira issues into Paperclip projects.",
+  "author": "Andriy Dmytruk",
+  "contributors": [
+    "Álvaro Sánchez-Mariscal"
+  ],
   "license": "Apache-2.0",
   "type": "module",
   "packageManager": "pnpm@10.33.0",
