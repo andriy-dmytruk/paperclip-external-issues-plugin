@@ -33,8 +33,12 @@
     "build": "node ./scripts/build.mjs",
     "dev": "node ./scripts/build.mjs --watch",
     "dev:ui": "paperclip-plugin-dev-server --root . --ui-dir dist/ui --port 4177",
+    "jira:fetch-wadl": "node --import tsx ./scripts/jira-dc/fetch-wadl.ts",
+    "jira:convert-wadl": "node --import tsx ./scripts/jira-dc/convert-wadl.ts",
+    "jira:sync-spec": "node --import tsx ./scripts/jira-dc/sync-spec.ts",
+    "jira:generate-client": "node --import tsx ./scripts/jira-dc/generate-client.ts",
     "prepack": "pnpm build",
-    "test": "node --test tests/build-script.spec.mjs && tsx --test tests/plugin.spec.ts",
+    "test": "node --test tests/build-script.spec.mjs && tsx --test tests/plugin.spec.ts tests/jira-wadl.spec.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -42,10 +46,15 @@
     "react": "^19.2.5"
   },
   "devDependencies": {
+    "@openapitools/openapi-generator-cli": "^2.31.1",
     "@types/node": "24.12.2",
     "@types/react": "19.2.14",
     "esbuild": "0.28.0",
+    "fast-xml-parser": "^5.7.1",
     "tsx": "4.21.0",
     "typescript": "6.0.3"
+  },
+  "openapiGeneratorCli": {
+    "version": "7.16.0"
   }
 }

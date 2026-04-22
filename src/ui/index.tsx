@@ -14,6 +14,11 @@ import {
   type JiraPluginConfig,
   type JiraProviderConfig
 } from './plugin-config.js';
+import {
+  formatJiraUserLabel,
+  formatJiraUserSecondary,
+  type JiraUserReference
+} from './assignees.js';
 
 type MappingRow = {
   id: string;
@@ -28,7 +33,7 @@ type MappingRow = {
 type TaskFilters = {
   onlyActive?: boolean;
   author?: string;
-  assignee?: string;
+  assignee?: JiraUserReference;
   issueNumberGreaterThan?: number;
   issueNumberLessThan?: number;
 };
@@ -52,8 +57,12 @@ type ConnectionTestState = {
 };
 
 type PopupState = {
+  selectedProjectId?: string | null;
+  selectedProjectName?: string | null;
   selectedProviderId?: string | null;
-  selectedProviderKey: string;
+  selectedProviderKey?: string | null;
+  defaultAssignee?: JiraUserReference | null;
+  defaultStatus?: string;
   mappings: Array<{
     id: string;
     providerId?: string;
@@ -63,7 +72,13 @@ type PopupState = {
     paperclipProjectName: string;
     filters?: TaskFilters;
   }>;
-  availableProjects: Array<{ id: string; name: string }>;
+  availableProjects: Array<{
+    id: string;
+    name: string;
+    providerId?: string | null;
+    providerDisplayName?: string | null;
+    isConfigured?: boolean;
+  }>;
   providers: Array<{
     providerId: string;
     providerKey: string;
@@ -76,17 +91,26 @@ type PopupState = {
   }>;
   providerConfig?: {
     providerId?: string | null;
+    providerKey?: string | null;
     providerName?: string;
     jiraBaseUrl?: string;
     jiraUserEmail?: string;
     defaultIssueType?: string;
     tokenSaved?: boolean;
-  };
+  } | null;
   scheduleFrequencyMinutes?: number;
   syncProgress: SyncProgressState;
   connectionTest: ConnectionTestState;
   configReady: boolean;
   configMessage: string;
+  projectConfig?: {
+    projectId: string;
+    projectName: string;
+    providerId?: string | null;
+    defaultAssignee?: JiraUserReference | null;
+    defaultStatus?: string;
+    scheduleFrequencyMinutes?: number;
+  } | null;
 };
 
 type ProvidersData = {
@@ -155,6 +179,10 @@ type CleanupCandidate = {
   title: string;
   jiraIssueKey: string;
   status: string;
+};
+
+type JiraUserSearchData = {
+  suggestions: JiraUserReference[];
 };
 
 function cardStyle(): React.CSSProperties {
@@ -408,7 +436,7 @@ function createEmptyProviderDraft(): JiraProviderConfig {
   };
 }
 
-function createEmptyMappingRow(providerId = ''): MappingRow {
+function createEmptyMappingRow(providerId = '', defaultAssignee?: JiraUserReference | null): MappingRow {
   return {
     id: `mapping-${Math.random().toString(36).slice(2, 10)}`,
     providerId,
@@ -416,7 +444,10 @@ function createEmptyMappingRow(providerId = ''): MappingRow {
     jiraJql: '',
     paperclipProjectId: '',
     paperclipProjectName: '',
-    filters: {}
+    filters: {
+      onlyActive: true,
+      ...(defaultAssignee ? { assignee: defaultAssignee } : {})
+    }
   };
 }
 
@@ -450,8 +481,8 @@ function describeMappingFilters(row: MappingRow): string[] {
   if (row.filters.author?.trim()) {
     labels.push(`Author: ${row.filters.author.trim()}`);
   }
-  if (row.filters.assignee?.trim()) {
-    labels.push(`Assignee: ${row.filters.assignee.trim()}`);
+  if (row.filters.assignee) {
+    labels.push(`Assignee: ${formatJiraUserLabel(row.filters.assignee)}`);
   }
   if (typeof row.filters.issueNumberGreaterThan === 'number') {
     labels.push(`>${row.filters.issueNumberGreaterThan}`);
@@ -463,6 +494,129 @@ function describeMappingFilters(row: MappingRow): string[] {
     labels.push('Custom JQL');
   }
   return labels;
+}
+
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebounced(value);
+    }, delayMs);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [delayMs, value]);
+
+  return debounced;
+}
+
+function JiraUserAutocomplete(props: {
+  companyId: string;
+  providerId?: string | null;
+  label: string;
+  value?: JiraUserReference | null;
+  placeholder?: string;
+  disabled?: boolean;
+  onChange: (user: JiraUserReference | null) => void;
+}): React.JSX.Element {
+  const [query, setQuery] = useState(formatJiraUserLabel(props.value));
+  const [open, setOpen] = useState(false);
+  const debouncedQuery = useDebouncedValue(query, 250);
+  const search = usePluginData<JiraUserSearchData>('sync.users.search', {
+    companyId: props.companyId,
+    providerId: props.providerId ?? undefined,
+    query: props.providerId ? debouncedQuery : ''
+  });
+
+  useEffect(() => {
+    const nextLabel = formatJiraUserLabel(props.value);
+    if (nextLabel !== query) {
+      setQuery(nextLabel);
+    }
+  }, [props.value]);
+
+  const suggestions = search.data?.suggestions ?? [];
+  const canSearch = Boolean(props.providerId && debouncedQuery.trim().length > 0 && !props.disabled);
+
+  return (
+    <label style={{ ...stackStyle(6), position: 'relative' }}>
+      <span style={{ fontSize: 13, fontWeight: 600 }}>{props.label}</span>
+      <input
+        style={inputStyle()}
+        value={query}
+        disabled={props.disabled}
+        placeholder={props.placeholder}
+        onFocus={() => setOpen(true)}
+        onBlur={() => {
+          window.setTimeout(() => {
+            setOpen(false);
+            setQuery(formatJiraUserLabel(props.value));
+          }, 120);
+        }}
+        onChange={(event) => {
+          const nextValue = event.target.value;
+          setQuery(nextValue);
+          if (props.value) {
+            props.onChange(null);
+          }
+          if (!open) {
+            setOpen(true);
+          }
+        }}
+      />
+      {props.value ? (
+        <div style={{ fontSize: 12, opacity: 0.72 }}>
+          {formatJiraUserSecondary(props.value) || props.value.accountId}
+        </div>
+      ) : null}
+      {open && canSearch ? (
+        <div style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          top: 'calc(100% + 4px)',
+          zIndex: 20,
+          ...panelStyle(),
+          display: 'grid',
+          gap: 6,
+          maxHeight: 220,
+          overflowY: 'auto'
+        }}
+        >
+          {search.loading ? (
+            <div style={{ fontSize: 12, opacity: 0.72 }}>Searching Jira users…</div>
+          ) : suggestions.length > 0 ? suggestions.map((suggestion) => (
+            <button
+              key={suggestion.accountId}
+              type="button"
+              style={{
+                ...buttonStyle(),
+                textAlign: 'left',
+                justifyContent: 'flex-start',
+                display: 'grid',
+                gap: 2
+              }}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                props.onChange(suggestion);
+                setQuery(formatJiraUserLabel(suggestion));
+                setOpen(false);
+              }}
+            >
+              <span>{formatJiraUserLabel(suggestion)}</span>
+              {formatJiraUserSecondary(suggestion) ? (
+                <span style={{ fontSize: 12, opacity: 0.72 }}>{formatJiraUserSecondary(suggestion)}</span>
+              ) : null}
+            </button>
+          )) : (
+            <div style={{ fontSize: 12, opacity: 0.72 }}>No Jira users match this search yet.</div>
+          )}
+        </div>
+      ) : null}
+    </label>
+  );
 }
 
 function ResultMessage(props: {
@@ -589,6 +743,7 @@ function SyncProgressPanel(props: {
 function MappingEditor(props: {
   rows: MappingRow[];
   providers: Array<{ providerId: string; displayName: string }>;
+  currentProjectName?: string;
   onCreate: () => void;
   onEdit: (rowId: string) => void;
   onRemove: (rowId: string) => void;
@@ -607,7 +762,7 @@ function MappingEditor(props: {
       </div>
       {props.rows.length === 0 ? (
         <div style={{ fontSize: 13, opacity: 0.72 }}>
-          No mappings yet. Add one to connect a Paperclip project to an upstream Jira project.
+          No mappings yet. Add one to connect this Paperclip project to an upstream Jira project.
         </div>
       ) : props.rows.map((row, index) => {
         const providerLabel = props.providers.find((provider) => provider.providerId === row.providerId)?.displayName ?? 'No provider';
@@ -618,14 +773,14 @@ function MappingEditor(props: {
               <div style={rowStyle()}>
                 <strong>Mapping {index + 1}</strong>
                 <span style={badgeStyle(row.providerId ? 'info' : 'local')}>{providerLabel}</span>
-                <span style={badgeStyle(row.paperclipProjectId ? 'synced' : 'local')}>
-                  {row.paperclipProjectName || 'No Paperclip project'}
-                </span>
+                {props.currentProjectName ? (
+                  <span style={badgeStyle('synced')}>{props.currentProjectName}</span>
+                ) : null}
               </div>
               <div style={{ fontSize: 13, opacity: 0.84 }}>
                 <strong>{row.jiraProjectKey || 'No Jira project key'}</strong>
-                {' '}to{' '}
-                <strong>{row.paperclipProjectName || 'No Paperclip project selected'}</strong>
+                {' '}into{' '}
+                <strong>{props.currentProjectName || row.paperclipProjectName || 'No Paperclip project selected'}</strong>
               </div>
               {filterLabels.length > 0 ? (
                 <div style={rowStyle()}>
@@ -671,14 +826,22 @@ function SyncCenterSurface(props: {
 }): React.JSX.Element {
   const companyId = props.companyId;
   const toast = usePluginToast();
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(props.scopeProjectId ?? '');
   const [selectedProviderId, setSelectedProviderId] = useState<string>('');
   const providers = usePluginData<ProvidersData>('sync.providers', { companyId });
   const popup = usePluginData<PopupState>('sync.popupState', {
     companyId,
-    providerId: selectedProviderId
+    providerId: selectedProviderId,
+    projectId: props.scopeProjectId ?? selectedProjectId,
+    issueId: props.scopeIssueId
   });
   const saveRegistration = useActionRunner<{
     companyId: string;
+    projectId?: string;
+    projectName?: string;
+    providerId?: string | null;
+    defaultAssignee?: JiraUserReference | null;
+    defaultStatus?: string;
     scheduleFrequencyMinutes: number;
     mappings: Array<{
       id?: string;
@@ -692,19 +855,27 @@ function SyncCenterSurface(props: {
   }>('settings.saveRegistration');
   const testConnection = useActionRunner<{
     companyId: string;
+    projectId?: string;
     providerId?: string;
     providerKey: string;
     config: JiraProviderConfig;
   }>('sync.provider.testConnection');
+  const refreshIdentity = useActionRunner<{
+    companyId: string;
+    projectId: string;
+    providerId: string;
+  }>('sync.project.refreshIdentity');
   const runSync = useActionRunner<{
     companyId: string;
     providerKey: string;
     projectId?: string;
     issueId?: string;
   }>('sync.runNow');
-  const cleanupCandidates = useActionRunner<{ companyId: string }>('sync.findCleanupCandidates');
+  const cleanupCandidates = useActionRunner<{ companyId: string; projectId?: string }>('sync.findCleanupCandidates');
   const { configJson, loading: configLoading, saving: configSaving, error: configError, save } = usePluginConfig();
   const [scheduleFrequencyMinutes, setScheduleFrequencyMinutes] = useState(15);
+  const [defaultAssignee, setDefaultAssignee] = useState<JiraUserReference | null>(null);
+  const [defaultStatus, setDefaultStatus] = useState('in_progress');
   const [rows, setRows] = useState<MappingRow[]>([]);
   const [providerDrafts, setProviderDrafts] = useState<JiraProviderConfig[]>([]);
   const [draftTokensByProviderId, setDraftTokensByProviderId] = useState<Record<string, string>>({});
@@ -726,10 +897,13 @@ function SyncCenterSurface(props: {
   } | null>(null);
   const [localResult, setLocalResult] = useState<{ message: string; tone: 'default' | 'success' | 'error' } | null>(null);
   const configuredProviders = buildConfiguredProviders(configJson);
-  const selectedProvider = providerDrafts.find((provider) => provider.id === selectedProviderId) ?? providerDrafts[0];
+  const activeProjectId = props.scopeProjectId ?? selectedProjectId;
+  const activeProject = popup.data?.availableProjects?.find((project) => project.id === activeProjectId);
+  const selectedProvider = providerDrafts.find((provider) => provider.id === selectedProviderId) ?? null;
   const selectedProviderToken = selectedProvider ? draftTokensByProviderId[selectedProvider.id] ?? '' : '';
   const selectedProviderStatus = popup.data?.providers?.find((provider) => provider.providerId === selectedProvider?.id)
     ?? providers.data?.providers?.find((provider) => provider.providerId === selectedProvider?.id);
+  const providerEnabled = Boolean(selectedProviderId && selectedProvider);
   const visibleCleanupCandidates = cleanupModal
     ? cleanupModal.candidates.filter((candidate) => {
         if (cleanupModal.mode === 'all') {
@@ -747,56 +921,57 @@ function SyncCenterSurface(props: {
     : [];
 
   useEffect(() => {
-    const nextSelectedProviderId = popup.data?.selectedProviderId ?? providerDrafts[0]?.id ?? configuredProviders[0]?.id ?? '';
-    if (nextSelectedProviderId && nextSelectedProviderId !== selectedProviderId) {
+    const nextSelectedProjectId = props.scopeProjectId ?? popup.data?.selectedProjectId ?? '';
+    if (nextSelectedProjectId !== selectedProjectId) {
+      setSelectedProjectId(nextSelectedProjectId);
+    }
+  }, [popup.data?.selectedProjectId, props.scopeProjectId, selectedProjectId]);
+
+  useEffect(() => {
+    const nextSelectedProviderId = popup.data?.selectedProviderId ?? '';
+    if (nextSelectedProviderId !== selectedProviderId) {
       setSelectedProviderId(nextSelectedProviderId);
     }
-  }, [configuredProviders, popup.data?.selectedProviderId, providerDrafts, selectedProviderId]);
+  }, [popup.data?.selectedProviderId, selectedProviderId]);
 
   useEffect(() => {
     setProviderDrafts(buildConfiguredProviders(configJson));
   }, [configJson]);
 
   useEffect(() => {
-    if (!popup.data) {
+    const popupData = popup.data;
+    if (!popupData) {
       return;
     }
 
-    setScheduleFrequencyMinutes(popup.data.scheduleFrequencyMinutes ?? 15);
+    setScheduleFrequencyMinutes(popupData.scheduleFrequencyMinutes ?? 15);
+    setDefaultAssignee(popupData.defaultAssignee ?? popupData.projectConfig?.defaultAssignee ?? null);
+    setDefaultStatus(popupData.defaultStatus ?? popupData.projectConfig?.defaultStatus ?? 'in_progress');
     setRows(
-      popup.data.mappings.length > 0
-        ? popup.data.mappings.map((mapping) => ({
+      popupData.mappings.length > 0
+        ? popupData.mappings.map((mapping) => ({
             id: mapping.id,
-            providerId: mapping.providerId ?? (popup.data?.providers?.[0]?.providerId ?? ''),
+            providerId: mapping.providerId ?? (popupData.selectedProviderId ?? ''),
             jiraProjectKey: mapping.jiraProjectKey,
             jiraJql: mapping.jiraJql ?? '',
             paperclipProjectId: mapping.paperclipProjectId ?? '',
             paperclipProjectName: mapping.paperclipProjectName,
             filters: {
-              onlyActive: mapping.filters?.onlyActive ?? false,
+              onlyActive: mapping.filters?.onlyActive ?? true,
               author: mapping.filters?.author ?? '',
-              assignee: mapping.filters?.assignee ?? '',
+              assignee: mapping.filters?.assignee ?? undefined,
               issueNumberGreaterThan: mapping.filters?.issueNumberGreaterThan,
               issueNumberLessThan: mapping.filters?.issueNumberLessThan
             }
           }))
-        : [createEmptyMappingRow(popup.data.providers?.[0]?.providerId ?? providerDrafts[0]?.id ?? '')]
+        : activeProjectId && popupData.selectedProviderId
+          ? [createEmptyMappingRow(
+              popupData.selectedProviderId,
+              popupData.defaultAssignee ?? popupData.projectConfig?.defaultAssignee ?? null
+            )]
+          : []
     );
-  }, [popup.data, providerDrafts]);
-
-  function updateSelectedProvider(patch: Partial<JiraProviderConfig>) {
-    if (!selectedProvider) {
-      return;
-    }
-    setProviderDrafts((current) => current.map((provider) => (
-      provider.id === selectedProvider.id
-        ? {
-            ...provider,
-            ...patch
-          }
-        : provider
-    )));
-  }
+  }, [activeProjectId, popup.data]);
 
   function openCreateProviderModal() {
     setProviderModal({
@@ -859,9 +1034,20 @@ function SyncCenterSurface(props: {
   }
 
   function openCreateMappingModal() {
+    if (!activeProjectId) {
+      setLocalResult({
+        message: 'Choose a Paperclip project before adding mappings.',
+        tone: 'error'
+      });
+      return;
+    }
     setMappingModal({
       mode: 'create',
-      draft: createEmptyMappingRow(selectedProvider?.id ?? providerDrafts[0]?.id ?? popup.data?.providers?.[0]?.providerId ?? '')
+      draft: {
+        ...createEmptyMappingRow(selectedProvider?.id ?? '', defaultAssignee),
+        paperclipProjectId: activeProjectId,
+        paperclipProjectName: activeProject?.name ?? popup.data?.selectedProjectName ?? ''
+      }
     });
   }
 
@@ -889,7 +1075,8 @@ function SyncCenterSurface(props: {
       ...mappingModal.draft,
       jiraProjectKey: mappingModal.draft.jiraProjectKey.trim().toUpperCase(),
       jiraJql: mappingModal.draft.jiraJql,
-      paperclipProjectName: mappingModal.draft.paperclipProjectName,
+      paperclipProjectId: activeProjectId,
+      paperclipProjectName: activeProject?.name ?? popup.data?.selectedProjectName ?? mappingModal.draft.paperclipProjectName,
       filters: { ...mappingModal.draft.filters }
     };
 
@@ -901,7 +1088,15 @@ function SyncCenterSurface(props: {
     setMappingModal(null);
   }
 
-  async function handleSaveAllSettings() {
+  async function handleSaveAllSettings(): Promise<boolean> {
+    if (!activeProjectId || !activeProject?.name) {
+      setLocalResult({
+        message: 'Choose a Paperclip project before saving sync settings.',
+        tone: 'error'
+      });
+      return false;
+    }
+
     const nextProviders = providerDrafts
       .filter((provider) => provider.name.trim())
       .map((provider) => {
@@ -937,35 +1132,49 @@ function SyncCenterSurface(props: {
       defaultIssueType: undefined
     };
 
-    await save(nextConfig);
-    setDraftTokensByProviderId({});
-    await saveRegistration.run({
-      companyId,
-      scheduleFrequencyMinutes,
-      mappings: rows
-        .filter((row) => row.providerId.trim() && row.jiraProjectKey.trim() && row.paperclipProjectName.trim())
-        .map((row) => ({
-          id: row.id,
-          providerId: row.providerId.trim(),
-          jiraProjectKey: row.jiraProjectKey.trim().toUpperCase(),
-          jiraJql: row.jiraJql.trim() || undefined,
-          paperclipProjectId: row.paperclipProjectId.trim() || undefined,
-          paperclipProjectName: row.paperclipProjectName.trim(),
-          filters: {
-            ...(row.filters.onlyActive ? { onlyActive: true } : {}),
-            ...(row.filters.author?.trim() ? { author: row.filters.author.trim() } : {}),
-            ...(row.filters.assignee?.trim() ? { assignee: row.filters.assignee.trim() } : {}),
-            ...(typeof row.filters.issueNumberGreaterThan === 'number' ? { issueNumberGreaterThan: row.filters.issueNumberGreaterThan } : {}),
-            ...(typeof row.filters.issueNumberLessThan === 'number' ? { issueNumberLessThan: row.filters.issueNumberLessThan } : {})
-          }
-        }))
-    });
-    setLocalResult({
-      message: 'Saved provider and mapping settings.',
-      tone: 'success'
-    });
-    await popup.refresh();
-    await providers.refresh();
+    try {
+      await save(nextConfig);
+      setDraftTokensByProviderId({});
+      await saveRegistration.run({
+        companyId,
+        projectId: activeProjectId,
+        projectName: activeProject.name,
+        providerId: selectedProvider?.id ?? null,
+        defaultAssignee,
+        defaultStatus,
+        scheduleFrequencyMinutes,
+        mappings: rows
+          .filter((row) => row.jiraProjectKey.trim())
+          .map((row) => ({
+            id: row.id,
+            providerId: selectedProvider?.id ?? row.providerId.trim(),
+            jiraProjectKey: row.jiraProjectKey.trim().toUpperCase(),
+            jiraJql: row.jiraJql.trim() || undefined,
+            paperclipProjectId: activeProjectId,
+            paperclipProjectName: activeProject.name,
+            filters: {
+              ...(row.filters.onlyActive ? { onlyActive: true } : {}),
+              ...(row.filters.author?.trim() ? { author: row.filters.author.trim() } : {}),
+              ...(row.filters.assignee ? { assignee: row.filters.assignee } : {}),
+              ...(typeof row.filters.issueNumberGreaterThan === 'number' ? { issueNumberGreaterThan: row.filters.issueNumberGreaterThan } : {}),
+              ...(typeof row.filters.issueNumberLessThan === 'number' ? { issueNumberLessThan: row.filters.issueNumberLessThan } : {})
+            }
+          }))
+      });
+      setLocalResult({
+        message: 'Saved project sync settings.',
+        tone: 'success'
+      });
+      await popup.refresh();
+      await providers.refresh();
+      return true;
+    } catch (error) {
+      setLocalResult({
+        message: error instanceof Error ? error.message : 'Could not save project sync settings.',
+        tone: 'error'
+      });
+      return false;
+    }
   }
 
   async function handleTestConnection() {
@@ -979,6 +1188,7 @@ function SyncCenterSurface(props: {
 
     await testConnection.run({
       companyId,
+      projectId: activeProjectId || undefined,
       providerId: selectedProvider.id,
       providerKey: 'jira',
       config: {
@@ -995,19 +1205,25 @@ function SyncCenterSurface(props: {
   }
 
   async function handleRunSync() {
-    await handleSaveAllSettings();
+    const saved = await handleSaveAllSettings();
+    if (!saved || !activeProjectId) {
+      return;
+    }
     await runSync.run({
       companyId,
       providerKey: 'jira',
-      ...(props.scopeProjectId ? { projectId: props.scopeProjectId } : {}),
+      projectId: activeProjectId,
       ...(props.scopeIssueId ? { issueId: props.scopeIssueId } : {})
     });
     await popup.refresh();
   }
 
   async function handleCleanup() {
-    await handleSaveAllSettings();
-    const result = await cleanupCandidates.run({ companyId }) as {
+    const saved = await handleSaveAllSettings();
+    if (!saved || !activeProjectId) {
+      return;
+    }
+    const result = await cleanupCandidates.run({ companyId, projectId: activeProjectId }) as {
       candidates?: CleanupCandidate[];
       count?: number;
       message?: string;
@@ -1086,6 +1302,7 @@ function SyncCenterSurface(props: {
             || localResult?.message
             || saveRegistration.message
             || testConnection.message
+            || refreshIdentity.message
             || runSync.message
             || cleanupCandidates.message
             || popup.data?.connectionTest?.message
@@ -1096,6 +1313,7 @@ function SyncCenterSurface(props: {
             || localResult?.tone === 'error'
             || saveRegistration.tone === 'error'
             || testConnection.tone === 'error'
+            || refreshIdentity.tone === 'error'
             || runSync.tone === 'error'
             || cleanupCandidates.tone === 'error'
             || popup.data?.connectionTest?.status === 'error'
@@ -1103,6 +1321,7 @@ function SyncCenterSurface(props: {
               : localResult?.tone === 'success'
                 || saveRegistration.tone === 'success'
                 || testConnection.tone === 'success'
+                || refreshIdentity.tone === 'success'
                 || runSync.tone === 'success'
                 || cleanupCandidates.tone === 'success'
                 || popup.data?.connectionTest?.status === 'success'
@@ -1110,6 +1329,43 @@ function SyncCenterSurface(props: {
                   : 'default'
           }
         />
+
+        <div style={panelStyle()}>
+          <div style={stackStyle(12)}>
+            <div style={rowStyle()}>
+              <strong>Paperclip project</strong>
+              {activeProject ? (
+                <span style={badgeStyle(activeProject.isConfigured ? 'synced' : 'local')}>
+                  {activeProject.isConfigured ? 'Configured' : 'Paperclip-only'}
+                </span>
+              ) : null}
+            </div>
+            {props.scopeProjectId ? (
+              <div style={{ fontSize: 14 }}>
+                <strong>{activeProject?.name ?? popup.data?.selectedProjectName ?? 'Selected project'}</strong>
+              </div>
+            ) : (
+              <label style={stackStyle(6)}>
+                <span style={{ fontSize: 13, fontWeight: 600 }}>Choose project</span>
+                <select
+                  style={inputStyle()}
+                  value={selectedProjectId}
+                  onChange={(event) => setSelectedProjectId(event.target.value)}
+                >
+                  <option value="">Select project</option>
+                  {(popup.data?.availableProjects ?? []).map((project) => (
+                    <option key={project.id} value={project.id}>{project.name}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <div style={{ fontSize: 12, opacity: 0.75 }}>
+              {activeProject
+                ? `Sync setup now belongs to ${activeProject.name}. Different Paperclip projects can use different providers.`
+                : 'Choose a Paperclip project first. New projects start without any connected issue provider.'}
+            </div>
+          </div>
+        </div>
 
         <div style={panelStyle()}>
           <div style={stackStyle(12)}>
@@ -1131,10 +1387,11 @@ function SyncCenterSurface(props: {
                 <span style={{ fontSize: 13, fontWeight: 600 }}>Saved provider</span>
                 <select
                   style={inputStyle()}
-                  value={selectedProvider?.id ?? ''}
+                  value={selectedProviderId}
+                  disabled={!activeProjectId}
                   onChange={(event) => setSelectedProviderId(event.target.value)}
                 >
-                  <option value="">Select provider</option>
+                  <option value="">None</option>
                   {providerDrafts.map((provider) => (
                     <option key={provider.id} value={provider.id}>{provider.name || 'Untitled provider'}</option>
                   ))}
@@ -1145,6 +1402,7 @@ function SyncCenterSurface(props: {
               <button
                 type="button"
                 style={buttonStyle('primary')}
+                disabled={!activeProjectId}
                 onClick={openCreateProviderModal}
               >
                 Create new
@@ -1152,77 +1410,136 @@ function SyncCenterSurface(props: {
               <button
                 type="button"
                 style={buttonStyle('secondary')}
-                disabled={!selectedProvider}
+                disabled={!selectedProvider || !activeProjectId}
                 onClick={openEditProviderModal}
               >
                 Edit selected
               </button>
             </div>
             <div style={{ fontSize: 12, opacity: 0.75 }}>
-              {selectedProviderStatus?.configSummary ?? 'Create a provider to start syncing.'}
+              {providerEnabled
+                ? (selectedProviderStatus?.configSummary ?? 'Create a provider to start syncing.')
+                : 'This project stays Paperclip-only until you choose a provider. Hide imported issues remains available for already imported Jira work.'}
             </div>
           </div>
         </div>
 
-        <div style={panelStyle()}>
-          <div style={stackStyle(12)}>
-            <label style={stackStyle(6)}>
-              <span style={{ fontSize: 13, fontWeight: 600 }}>Scheduled sync cadence (minutes)</span>
-              <input
-                style={inputStyle()}
-                type="number"
-                min={1}
-                max={1440}
-                value={scheduleFrequencyMinutes}
-                onChange={(event) => setScheduleFrequencyMinutes(Number(event.target.value) || 15)}
-              />
-            </label>
-          </div>
-        </div>
+        {providerEnabled ? (
+          <>
+            <div style={panelStyle()}>
+              <div style={stackStyle(12)}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+                  <JiraUserAutocomplete
+                    companyId={companyId}
+                    providerId={selectedProvider?.id ?? null}
+                    label="Default assignee"
+                    value={defaultAssignee}
+                    disabled={!activeProjectId || !providerEnabled}
+                    placeholder="Search Jira users"
+                    onChange={setDefaultAssignee}
+                  />
+                  <label style={stackStyle(6)}>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>Default status</span>
+                    <select
+                      style={inputStyle()}
+                      value={defaultStatus}
+                      disabled={!activeProjectId}
+                      onChange={(event) => setDefaultStatus(event.target.value)}
+                    >
+                      {PAPERCLIP_STATUS_OPTIONS.map((status) => (
+                        <option key={status} value={status}>{formatIssueStatus(status)}</option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <div style={rowStyle()}>
+                  <button
+                    type="button"
+                    style={buttonStyle()}
+                    disabled={!activeProjectId || !selectedProvider?.id || refreshIdentity.busy}
+                    onClick={() => {
+                      if (!activeProjectId || !selectedProvider?.id) {
+                        return;
+                      }
+                      void refreshIdentity.run({
+                        companyId,
+                        projectId: activeProjectId,
+                        providerId: selectedProvider.id
+                      }).then((result) => {
+                        const nextAssignee = (result as { defaultAssignee?: JiraUserReference | null }).defaultAssignee ?? null;
+                        setDefaultAssignee(nextAssignee);
+                        void popup.refresh();
+                      });
+                    }}
+                  >
+                    {refreshIdentity.busy ? 'Loading Jira user…' : 'Use current Jira user'}
+                  </button>
+                </div>
+                <label style={stackStyle(6)}>
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>Scheduled sync cadence (minutes)</span>
+                  <input
+                    style={inputStyle()}
+                    type="number"
+                    min={1}
+                    max={1440}
+                    value={scheduleFrequencyMinutes}
+                    disabled={!activeProjectId}
+                    onChange={(event) => setScheduleFrequencyMinutes(Number(event.target.value) || 15)}
+                  />
+                </label>
+              </div>
+            </div>
 
-        <div style={panelStyle()}>
-          <div style={stackStyle(12)}>
-            <strong>Project mappings</strong>
-            <MappingEditor
-              rows={rows}
-              providers={(popup.data?.providers ?? []).map((provider) => ({
-                providerId: provider.providerId,
-                displayName: provider.displayName
-              }))}
-                onCreate={openCreateMappingModal}
-                onEdit={openEditMappingModal}
-                onRemove={(rowId) => setRows((current) => current.filter((row) => row.id !== rowId))}
-            />
-          </div>
-        </div>
+            <div style={panelStyle()}>
+              <div style={stackStyle(12)}>
+                <strong>Project mappings</strong>
+                <MappingEditor
+                  rows={rows}
+                  currentProjectName={activeProject?.name ?? popup.data?.selectedProjectName ?? undefined}
+                  providers={(popup.data?.providers ?? []).map((provider) => ({
+                    providerId: provider.providerId,
+                    displayName: provider.displayName
+                  }))}
+                  onCreate={openCreateMappingModal}
+                  onEdit={openEditMappingModal}
+                  onRemove={(rowId) => setRows((current) => current.filter((row) => row.id !== rowId))}
+                />
+              </div>
+            </div>
+          </>
+        ) : null}
 
         <div style={panelStyle()}>
           <div style={stackStyle(12)}>
             <strong>Actions</strong>
             <div style={{ fontSize: 12, opacity: 0.72 }}>
-              Sync always uses the latest saved providers and mappings. "Sync now" saves first and then runs.
+              {providerEnabled
+                ? 'Sync always uses the latest saved provider and mappings for the selected Paperclip project. "Sync issues" saves first and then runs.'
+                : 'Save to keep this project Paperclip-only, or hide already imported issues without reconnecting the project to Jira.'}
             </div>
             <div style={rowStyle()}>
               <button
                 type="button"
                 style={buttonStyle('primary')}
-                disabled={saveRegistration.busy || configSaving}
+                disabled={!activeProjectId || saveRegistration.busy || configSaving}
                 onClick={() => void handleSaveAllSettings()}
               >
                 {saveRegistration.busy || configSaving ? 'Saving…' : 'Save settings'}
               </button>
-              <button
-                type="button"
-                style={buttonStyle('success')}
-                disabled={runSync.busy || saveRegistration.busy || configSaving}
-                onClick={() => void handleRunSync()}
-              >
-                {runSync.busy ? 'Syncing…' : 'Sync now'}
-              </button>
+              {providerEnabled ? (
+                <button
+                  type="button"
+                  style={buttonStyle('success')}
+                  disabled={!activeProjectId || runSync.busy || saveRegistration.busy || configSaving}
+                  onClick={() => void handleRunSync()}
+                >
+                  {runSync.busy ? 'Syncing…' : 'Sync issues'}
+                </button>
+              ) : null}
               <button
                 type="button"
                 style={buttonStyle()}
-                disabled={cleanupCandidates.busy || saveRegistration.busy || configSaving}
+                disabled={!activeProjectId || cleanupCandidates.busy || saveRegistration.busy || configSaving}
                 onClick={() => void handleCleanup()}
               >
                 {cleanupCandidates.busy ? 'Preparing…' : 'Hide imported issues'}
@@ -1367,7 +1684,7 @@ function SyncCenterSurface(props: {
                           delete next[providerIdToRemove];
                           return next;
                         });
-                        setSelectedProviderId(providerDrafts.find((provider) => provider.id !== providerIdToRemove)?.id ?? '');
+                        setSelectedProviderId('');
                         setProviderModal(null);
                       }}
                     >
@@ -1391,45 +1708,14 @@ function SyncCenterSurface(props: {
                   <span style={badgeStyle('info')}>Jira to Paperclip</span>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
-                  <label style={stackStyle(6)}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>Provider</span>
-                    <select
-                      style={inputStyle()}
-                      value={mappingModal.draft.providerId}
-                      onChange={(event) => setMappingModal((current) => current ? {
-                        ...current,
-                        draft: { ...current.draft, providerId: event.target.value }
-                      } : null)}
-                    >
-                      <option value="">Select provider</option>
-                      {(popup.data?.providers ?? []).map((provider) => (
-                        <option key={provider.providerId} value={provider.providerId}>{provider.displayName}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label style={stackStyle(6)}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>Paperclip project</span>
-                    <select
-                      style={inputStyle()}
-                      value={mappingModal.draft.paperclipProjectId}
-                      onChange={(event) => {
-                        const nextProject = (popup.data?.availableProjects ?? []).find((project) => project.id === event.target.value);
-                        setMappingModal((current) => current ? {
-                          ...current,
-                          draft: {
-                            ...current.draft,
-                            paperclipProjectId: event.target.value,
-                            paperclipProjectName: nextProject?.name ?? current.draft.paperclipProjectName
-                          }
-                        } : null);
-                      }}
-                    >
-                      <option value="">Select project</option>
-                      {(popup.data?.availableProjects ?? []).map((project) => (
-                        <option key={project.id} value={project.id}>{project.name}</option>
-                      ))}
-                    </select>
-                  </label>
+                  <div style={panelStyle()}>
+                    <div style={{ fontSize: 12, opacity: 0.7 }}>Provider</div>
+                    <strong>{selectedProvider?.name || 'No provider selected'}</strong>
+                  </div>
+                  <div style={panelStyle()}>
+                    <div style={{ fontSize: 12, opacity: 0.7 }}>Paperclip project</div>
+                    <strong>{activeProject?.name ?? popup.data?.selectedProjectName ?? 'No project selected'}</strong>
+                  </div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
                   <label style={stackStyle(6)}>
@@ -1496,24 +1782,23 @@ function SyncCenterSurface(props: {
                       } : null)}
                     />
                   </label>
-                  <label style={stackStyle(6)}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>Assignee</span>
-                    <input
-                      style={inputStyle()}
-                      value={mappingModal.draft.filters.assignee ?? ''}
-                      placeholder="Optional assignee username"
-                      onChange={(event) => setMappingModal((current) => current ? {
-                        ...current,
-                        draft: {
-                          ...current.draft,
-                          filters: {
-                            ...current.draft.filters,
-                            assignee: event.target.value
-                          }
+                  <JiraUserAutocomplete
+                    companyId={companyId}
+                    providerId={selectedProvider?.id ?? null}
+                    label="Assignee"
+                    value={mappingModal.draft.filters.assignee ?? null}
+                    placeholder="Search Jira users"
+                    onChange={(user) => setMappingModal((current) => current ? {
+                      ...current,
+                      draft: {
+                        ...current.draft,
+                        filters: {
+                          ...current.draft.filters,
+                          assignee: user ?? undefined
                         }
-                      } : null)}
-                    />
-                  </label>
+                      }
+                    } : null)}
+                  />
                   <label style={stackStyle(6)}>
                     <span style={{ fontSize: 13, fontWeight: 600 }}>Issue number greater than</span>
                     <input

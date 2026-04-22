@@ -1,38 +1,49 @@
-export interface GitHubSyncAssigneeOption {
-  id: string;
-  name: string;
-  title?: string;
-  status?: string;
+export interface JiraUserReference {
+  accountId: string;
+  displayName: string;
+  emailAddress?: string;
+  username?: string;
 }
 
-export function normalizeCompanyAssigneeOptionsResponse(response: unknown): GitHubSyncAssigneeOption[] {
-  if (!Array.isArray(response)) {
-    throw new Error('Unexpected company agents response: expected an array.');
+export function formatJiraUserLabel(user?: JiraUserReference | null): string {
+  if (!user) {
+    return '';
   }
 
-  return response
-    .map((entry) => {
-      if (!entry || typeof entry !== 'object') {
-        return null;
-      }
+  return user.displayName || user.emailAddress || user.username || user.accountId;
+}
 
-      const record = entry as Record<string, unknown>;
-      const id = typeof record.id === 'string' ? record.id.trim() : '';
-      const name = typeof record.name === 'string' ? record.name.trim() : '';
-      const status = typeof record.status === 'string' ? record.status.trim() : '';
-      const title = typeof record.title === 'string' ? record.title.trim() : '';
+export function formatJiraUserSecondary(user?: JiraUserReference | null): string {
+  if (!user) {
+    return '';
+  }
 
-      if (!id || !name || status === 'terminated') {
-        return null;
-      }
+  if (user.emailAddress && user.emailAddress !== user.displayName) {
+    return user.emailAddress;
+  }
 
-      return {
-        id,
-        name,
-        ...(title ? { title } : {}),
-        ...(status ? { status } : {})
-      };
-    })
-    .filter((entry): entry is GitHubSyncAssigneeOption => entry !== null)
-    .sort((left, right) => left.name.localeCompare(right.name));
+  if (user.username && user.username !== user.displayName) {
+    return user.username;
+  }
+
+  if (user.accountId && user.accountId !== user.displayName) {
+    return user.accountId;
+  }
+
+  return '';
+}
+
+export function sameJiraUser(
+  left?: JiraUserReference | null,
+  right?: JiraUserReference | null
+): boolean {
+  if (!left && !right) {
+    return true;
+  }
+
+  if (!left || !right) {
+    return false;
+  }
+
+  return left.accountId === right.accountId;
 }
