@@ -169,7 +169,7 @@ function makeAgent(overrides: Record<string, unknown> = {}) {
 
 test('manifest keeps sync launchers on project and issue surfaces only', async () => {
   assert.equal(manifest.id, 'paperclip-jira-plugin');
-  assert.equal(manifest.displayName, 'Issue Sync');
+  assert.equal(manifest.displayName, 'External Issue Sync');
   assert.ok(manifest.ui?.slots?.some((slot) => slot.type === 'settingsPage'));
   assert.ok((manifest.instanceConfigSchema as any)?.properties?.jiraToken);
   assert.deepEqual(
@@ -1642,7 +1642,7 @@ test('sync.runNow marks provider health as degraded when upstream search fails',
   }
 });
 
-test('sync.runNow unhides a previously hidden imported Jira issue when it reappears upstream', async () => {
+test('sync.runNow recreates a hidden imported Jira issue when it reappears upstream', async () => {
   const restoreFetch = installMockFetch(async (input) => {
     const url = typeof input === 'string' ? input : input.toString();
     if (url.endsWith('/rest/api/2/search')) {
@@ -1761,17 +1761,31 @@ test('sync.runNow unhides a previously hidden imported Jira issue when it reappe
 
     const syncState = await harness.performAction<{
       status: string;
-      updatedCount?: number;
+      importedCount?: number;
     }>('sync.runNow', {
       companyId: 'company-1'
     });
 
-    const reloadedIssue = await harness.ctx.issues.get('issue-hidden-sync', 'company-1');
+    const reloadedHiddenIssue = await harness.ctx.issues.get('issue-hidden-sync', 'company-1');
+    const importedIssues = await harness.ctx.issues.list({
+      companyId: 'company-1',
+      projectId: 'project-1'
+    });
+    const visibleReplacement = importedIssues.find((issue) => issue.id !== 'issue-hidden-sync' && issue.title === '[GRB-461] Imported from Jira');
+    const issueLinks = await harness.ctx.entities.list({
+      entityType: 'paperclip-jira-plugin.issue-link',
+      limit: 20
+    });
+    const newestLinkForKey = issueLinks
+      .map((record) => record.data as Record<string, unknown>)
+      .filter((record) => record.jiraIssueKey === 'GRB-461')
+      .sort((left, right) => Date.parse(String(right.lastSyncedAt ?? '')) - Date.parse(String(left.lastSyncedAt ?? '')))[0];
 
     assert.equal(syncState.status, 'success');
-    assert.equal(syncState.updatedCount, 1);
-    assert.equal(reloadedIssue?.hiddenAt, null);
-    assert.equal(reloadedIssue?.title, '[GRB-461] Imported from Jira');
+    assert.equal(syncState.importedCount, 1);
+    assert.notEqual(reloadedHiddenIssue?.hiddenAt, null);
+    assert.ok(visibleReplacement);
+    assert.equal(newestLinkForKey?.issueId, visibleReplacement?.id);
   } finally {
     restoreFetch();
   }
@@ -4205,7 +4219,7 @@ test('sync.findCleanupCandidates ignores hidden imported issues', async () => {
         id: 'issue-hidden-import',
         title: '[GRB-778] Hidden imported Jira issue',
         description: 'Imported body\n\n<!-- paperclip-jira-plugin-upstream: GRB-778 -->',
-        hiddenAt: new Date('2026-04-21T00:00:00.000Z'),
+        hidden: true,
         status: 'backlog'
       })
     ]
@@ -4243,6 +4257,74 @@ test('sync.findCleanupCandidates ignores hidden imported issues', async () => {
 
   assert.equal(result.count, 0);
   assert.equal(result.candidates.length, 0);
+});
+
+test('sync.cleanupImportedIssues accepts selected issues without mutating issue visibility directly', async () => {
+  const harness = createTestHarness({
+    manifest,
+    config: {
+      jiraBaseUrl: 'https://jira.example.com',
+      jiraToken: 'jira-token'
+    } as any
+  });
+  await plugin.definition.setup(harness.ctx);
+
+  harness.seed({
+    projects: [makeProject()],
+    issues: [
+      makeIssue({
+        id: 'issue-cleanup-import',
+        title: '[GRB-779] Cleanup imported Jira issue',
+        description: 'Imported body\n\n<!-- paperclip-jira-plugin-upstream: GRB-779 -->',
+        hiddenAt: null,
+        status: 'backlog'
+      })
+    ]
+  });
+
+  await harness.ctx.entities.upsert({
+    entityType: 'paperclip-jira-plugin.issue-link',
+    scopeKind: 'issue',
+    scopeId: 'issue-cleanup-import',
+    externalId: 'GRB-779',
+    title: 'GRB-779',
+    status: 'Backlog',
+    data: {
+      issueId: 'issue-cleanup-import',
+      companyId: 'company-1',
+      projectId: 'project-1',
+      jiraIssueId: '10079',
+      jiraIssueKey: 'GRB-779',
+      jiraProjectKey: 'GRB',
+      jiraUrl: 'https://jira.example.com/browse/GRB-779',
+      jiraStatusName: 'Backlog',
+      jiraStatusCategory: 'To Do',
+      lastSyncedAt: '2026-04-21T13:08:38.000Z',
+      lastPulledAt: '2026-04-21T13:08:38.000Z',
+      source: 'jira'
+    }
+  });
+
+  const beforeCleanup = await harness.performAction<{
+    count: number;
+    candidates: Array<{ issueId: string }>;
+  }>('sync.findCleanupCandidates', {
+    companyId: 'company-1',
+    projectId: 'project-1'
+  });
+  assert.equal(beforeCleanup.count, 1);
+
+  const cleanupResult = await harness.performAction<{ count: number; message: string }>('sync.cleanupImportedIssues', {
+    companyId: 'company-1',
+    projectId: 'project-1',
+    issueIds: ['issue-cleanup-import']
+  });
+  assert.equal(cleanupResult.count, 1);
+  assert.match(cleanupResult.message, /Selected 1 imported issue/);
+
+  const reloadedIssue = await harness.ctx.issues.get('issue-cleanup-import', 'company-1');
+  assert.equal(reloadedIssue?.hiddenAt, null);
+  assert.notEqual((reloadedIssue as unknown as Record<string, unknown>)?.hidden, true);
 });
 
 test('sync.findCleanupCandidates includes untouched imported GitHub issues', async () => {

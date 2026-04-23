@@ -24,7 +24,7 @@ import {
   type JiraDcProviderConfig,
   type ProviderConfig
 } from './providers/shared/config.ts';
-import type { ProviderType } from './providers/shared/types.ts';
+import type { CanonicalUpstreamProject, ProviderType } from './providers/shared/types.ts';
 import { parseRepositoryReference } from './github-repo.ts';
 import { getIssueProviderAgentToolDeclaration } from './issue-provider-agent-tools.ts';
 
@@ -58,6 +58,7 @@ interface JiraMapping {
   id: string;
   companyId?: string;
   providerId?: string;
+  enabled?: boolean;
   jiraProjectKey: string;
   jiraJql?: string;
   paperclipProjectId?: string;
@@ -67,6 +68,7 @@ interface JiraMapping {
 
 interface JiraProjectMapping {
   id: string;
+  enabled?: boolean;
   jiraProjectKey: string;
   jiraJql?: string;
   filters?: JiraTaskFilters;
@@ -106,6 +108,10 @@ interface JiraUserReference {
   displayName: string;
   emailAddress?: string;
   username?: string;
+}
+
+interface UpstreamProjectSearchResult {
+  suggestions: CanonicalUpstreamProject[];
 }
 
 interface JiraTaskFilters {
@@ -561,6 +567,7 @@ function normalizeMapping(value: unknown, index: number): JiraMapping | null {
 
   return {
     id: normalizeOptionalString(record.id) ?? `mapping-${index + 1}`,
+    ...(typeof record.enabled === 'boolean' ? { enabled: record.enabled } : {}),
     jiraProjectKey,
     paperclipProjectName,
     ...(normalizeOptionalString(record.providerId) ? { providerId: normalizeOptionalString(record.providerId) } : {}),
@@ -584,6 +591,7 @@ function normalizeProjectMapping(value: unknown, index: number): JiraProjectMapp
 
   return {
     id: normalizeOptionalString(record.id) ?? `mapping-${index + 1}`,
+    ...(typeof record.enabled === 'boolean' ? { enabled: record.enabled } : {}),
     jiraProjectKey,
     ...(normalizeOptionalString(record.jiraJql) ? { jiraJql: normalizeOptionalString(record.jiraJql) } : {}),
     ...(record.filters ? { filters: normalizeTaskFilters(record.filters) } : {})
@@ -1091,12 +1099,20 @@ function getProjectSyncState(
   companyId?: string,
   projectId?: string
 ): SyncRunState {
-  if (!companyId || !projectId) {
+  if (!companyId) {
+    return { status: 'idle' };
+  }
+
+  if (!projectId) {
     return getSyncStateForCompany(settings, companyId);
   }
 
-  return getProjectConfigsForCompany(settings, companyId).find((projectConfig) => projectConfig.projectId === projectId)?.syncState
-    ?? getSyncStateForCompany(settings, companyId);
+  const projectConfig = getProjectConfigsForCompany(settings, companyId).find((entry) => entry.projectId === projectId);
+  if (!projectConfig) {
+    return getSyncStateForCompany(settings, companyId);
+  }
+
+  return projectConfig.syncState ?? { status: 'idle' };
 }
 
 function getProjectConnectionTestState(
@@ -1663,6 +1679,52 @@ async function searchGitHubUsers(
   }));
 }
 
+async function listGitHubRepositories(
+  ctx: PluginSetupContext,
+  config: GitHubConfig,
+  query?: string
+): Promise<CanonicalUpstreamProject[]> {
+  const trimmedQuery = query?.trim().toLowerCase() ?? '';
+  const repositories = await githubApiCall(ctx, config, async (api) => await api.rest.repos.listForAuthenticatedUser({
+    sort: 'updated',
+    per_page: 100,
+    affiliation: 'owner,collaborator,organization_member'
+  }));
+
+  const suggestions = repositories.data
+    .filter((repo) => {
+      const fullName = repo.full_name?.toLowerCase() ?? '';
+      const name = repo.name?.toLowerCase() ?? '';
+      const htmlUrl = repo.html_url?.toLowerCase() ?? '';
+      if (!trimmedQuery) {
+        return true;
+      }
+      return fullName.includes(trimmedQuery) || name.includes(trimmedQuery) || htmlUrl.includes(trimmedQuery);
+    })
+    .slice(0, 20)
+    .map((repo) => ({
+      id: String(repo.id),
+      key: repo.full_name ?? '',
+      displayName: repo.full_name ?? repo.name ?? 'Repository',
+      ...(repo.html_url ? { url: repo.html_url } : {})
+    }))
+    .filter((repo) => repo.key.trim().length > 0);
+
+  if (suggestions.length > 0) {
+    return suggestions;
+  }
+
+  if (config.defaultRepository?.trim()) {
+    return [{
+      id: config.defaultRepository,
+      key: config.defaultRepository,
+      displayName: config.defaultRepository
+    }];
+  }
+
+  return [];
+}
+
 async function resolveGitHubCurrentUser(
   ctx: PluginSetupContext,
   config: GitHubConfig
@@ -1899,6 +1961,40 @@ async function searchProviderUsers(
   }
 
   return await searchJiraUsers(ctx, await getResolvedConfig(ctx, providerId), query);
+}
+
+async function searchProviderProjects(
+  ctx: PluginSetupContext,
+  providerType: ProviderType,
+  providerId: string,
+  query?: string
+): Promise<CanonicalUpstreamProject[]> {
+  const adapter = providerRegistry.get(providerType);
+  if (!adapter.listUpstreamProjects) {
+    return [];
+  }
+
+  if (isGitHubProviderType(providerType)) {
+    return await adapter.listUpstreamProjects({
+      listUpstreamProjects: async (
+        _adapterProviderType: 'github_issues',
+        config: GitHubIssuesProviderConfig,
+        nextQuery?: string
+      ) => await listGitHubRepositories(ctx, await getResolvedGitHubConfig(ctx, providerId, config), nextQuery)
+    }, {
+      ...(await getProvidersFromConfig(await ctx.config.get())).find((provider) => provider.id === providerId) as GitHubIssuesProviderConfig
+    }, query);
+  }
+
+  return await adapter.listUpstreamProjects({
+    listUpstreamProjects: async (
+      _adapterProviderType: 'jira_dc' | 'jira_cloud',
+      config: JiraDcProviderConfig | JiraCloudProviderConfig,
+      nextQuery?: string
+    ) => await listJiraProjects(ctx, await getResolvedConfig(ctx, providerId, config), nextQuery)
+  }, {
+    ...(await getProvidersFromConfig(await ctx.config.get())).find((provider) => provider.id === providerId) as JiraDcProviderConfig | JiraCloudProviderConfig
+  }, query);
 }
 
 async function resolveProviderCurrentUser(
@@ -2799,6 +2895,48 @@ async function searchJiraUsers(
   return [];
 }
 
+async function listJiraProjects(
+  ctx: PluginSetupContext,
+  config: JiraConfig,
+  query?: string
+): Promise<CanonicalUpstreamProject[]> {
+  const trimmedQuery = query?.trim().toLowerCase() ?? '';
+  const response = await jiraApiCall(ctx, config, async (api) => await api.getAllProjects({
+    includeArchived: false
+  }));
+  const projects = Array.isArray(response) ? response : [];
+
+  return projects
+    .map((project) => {
+      const record = project && typeof project === 'object' ? project as Record<string, unknown> : null;
+      if (!record) {
+        return null;
+      }
+      const key = normalizeOptionalString(record.key);
+      const displayName = normalizeOptionalString(record.name) ?? key;
+      const url = normalizeOptionalString(record.self);
+      if (!key || !displayName) {
+        return null;
+      }
+      return {
+        id: normalizeOptionalString(record.id) ?? key,
+        key,
+        displayName,
+        ...(url ? { url } : {})
+      } satisfies CanonicalUpstreamProject;
+    })
+    .filter((project): project is CanonicalUpstreamProject => project !== null)
+    .filter((project) => {
+      if (!trimmedQuery) {
+        return true;
+      }
+      return project.key.toLowerCase().includes(trimmedQuery)
+        || project.displayName.toLowerCase().includes(trimmedQuery)
+        || (project.url?.toLowerCase().includes(trimmedQuery) ?? false);
+    })
+    .slice(0, 20);
+}
+
 function buildIssueMarker(jiraIssueKey: string): string {
   return `${HIDDEN_ISSUE_MARKER_PREFIX}${jiraIssueKey}${HIDDEN_ISSUE_MARKER_SUFFIX}`;
 }
@@ -2903,12 +3041,22 @@ async function findLinkedIssueEntityByKey(
       && (!options?.companyId || record.companyId === options.companyId)
       && (!options?.projectId || record.projectId === options.projectId)
     );
+  const sortedByLastSynced = [...scoped].sort((left, right) => {
+    const leftTime = left.lastSyncedAt ? Date.parse(left.lastSyncedAt) : Number.NEGATIVE_INFINITY;
+    const rightTime = right.lastSyncedAt ? Date.parse(right.lastSyncedAt) : Number.NEGATIVE_INFINITY;
+    return rightTime - leftTime;
+  });
 
   if (options?.companyId || options?.projectId) {
-    return scoped[0] ?? null;
+    return sortedByLastSynced[0] ?? null;
   }
 
-  return scoped[0] ?? null;
+  return sortedByLastSynced[0] ?? null;
+}
+
+function isIssueHidden(issue: Issue): boolean {
+  const issueRecord = issue as unknown as Record<string, unknown>;
+  return issueRecord.hidden === true || Boolean(issueRecord.hiddenAt);
 }
 
 async function upsertIssueLinkEntity(
@@ -3153,7 +3301,10 @@ async function importOrUpdateIssueFromJira(
   const providerId = await getMappingProviderId(ctx, mapping);
   const importedTitle = ensureIssueTitlePrefix(jiraIssue.summary, jiraIssue.key);
   const importedDescription = buildImportedIssueDescription(jiraIssue);
-  if (!existingLink) {
+
+  const createImportedIssue = async (
+    linkSeed?: JiraIssueLinkData
+  ): Promise<'imported'> => {
     const createdIssue = await ctx.issues.create({
       companyId,
       projectId: resolvedProject.id,
@@ -3170,6 +3321,7 @@ async function importOrUpdateIssueFromJira(
       companyId
     );
     await upsertIssueLinkEntity(ctx, createdIssue.id, {
+      ...(linkSeed ?? {}),
       issueId: createdIssue.id,
       companyId,
       projectId: resolvedProject.id,
@@ -3191,11 +3343,19 @@ async function importOrUpdateIssueFromJira(
     });
     await importJiraComments(ctx, companyId, createdIssue.id, jiraIssue);
     return 'imported';
+  };
+
+  if (!existingLink) {
+    return await createImportedIssue();
   }
 
   const existingIssue = await ctx.issues.get(existingLink.issueId, companyId);
   if (!existingIssue) {
-    return 'skipped';
+    return await createImportedIssue(existingLink);
+  }
+  if (isIssueHidden(existingIssue)) {
+    // If users hid an imported issue, keep it hidden and recreate a fresh synced copy on demand.
+    return await createImportedIssue(existingLink);
   }
 
   await ctx.issues.update(
@@ -3203,7 +3363,6 @@ async function importOrUpdateIssueFromJira(
     {
       title: importedTitle,
       description: importedDescription,
-      hiddenAt: null,
       ...mappedPaperclipState
     } as Record<string, unknown>,
     companyId
@@ -3257,19 +3416,22 @@ async function syncMappings(
     }, options.projectId).then((next) => getProjectSyncState(next, companyId, options.projectId));
   }
   const candidateMappings = scopedProjectConfig
-    ? scopedProjectConfig.mappings.map((mapping) => ({
+    ? scopedProjectConfig.mappings
+      .filter((mapping) => mapping.enabled !== false)
+      .map((mapping) => ({
         id: mapping.id,
         companyId,
         providerId: scopedProjectConfig.providerId,
         jiraProjectKey: mapping.jiraProjectKey,
+        ...(mapping.enabled !== false ? { enabled: true } : {}),
         ...(mapping.jiraJql ? { jiraJql: mapping.jiraJql } : {}),
         paperclipProjectId: scopedProjectConfig.projectId,
         paperclipProjectName: scopedProjectConfig.projectName,
         ...(mapping.filters ? { filters: mapping.filters } : {})
       }))
     : options?.projectId
-      ? allMappings.filter((mapping) => mappingMatchesProject(mapping, scopedProject))
-      : allMappings;
+      ? allMappings.filter((mapping) => mapping.enabled !== false && mappingMatchesProject(mapping, scopedProject))
+      : allMappings.filter((mapping) => mapping.enabled !== false);
   const mappings: JiraMapping[] = [];
   for (const mapping of candidateMappings) {
     const resolvedProject = await resolvePaperclipProjectForMapping(ctx, companyId, mapping);
@@ -3291,7 +3453,7 @@ async function syncMappings(
   if (mappings.length === 0) {
     return await saveSyncState(ctx, workingSettings, companyId, {
       status: 'error',
-      message: 'Save at least one Jira-to-Paperclip project mapping before running sync.',
+      message: 'Enable at least one project mapping before running sync.',
       checkedAt: new Date().toISOString(),
       lastRunTrigger: options?.trigger ?? 'manual'
     }, options?.projectId).then((next) => getProjectSyncState(next, companyId, options?.projectId));
@@ -3497,6 +3659,7 @@ async function buildSettingsRegistrationData(
   const selectedMappings = projectConfig?.mappings.map((mapping) => ({
     id: mapping.id,
     providerId: projectConfig.providerId,
+    enabled: mapping.enabled !== false,
     jiraProjectKey: mapping.jiraProjectKey,
     ...(mapping.jiraJql ? { jiraJql: mapping.jiraJql } : {}),
     paperclipProjectId: projectConfig.projectId,
@@ -3641,7 +3804,8 @@ async function buildSyncProvidersData(
                 : 'Needs config',
         healthMessage: providerConnectionTest.message,
         configSummary: configSummary.message,
-        supportsConnectionTest: true
+        supportsConnectionTest: true,
+        tokenSaved: config.tokenSaved
       };
     }))
   };
@@ -4395,7 +4559,8 @@ async function findCleanupCandidates(
     if (!issue) {
       continue;
     }
-    if (issue.hiddenAt) {
+    const issueRecord = issue as unknown as Record<string, unknown>;
+    if (issueRecord.hidden === true || Boolean(issueRecord.hiddenAt)) {
       continue;
     }
 
@@ -4533,6 +4698,7 @@ async function persistProjectRegistration(
       mappings: (() => {
         const normalizedMappings = groupedInput.mappings.map((entry, mappingIndex) => ({
         id: normalizeOptionalString((entry as Record<string, unknown>).id) ?? `mapping-${mappingIndex + 1}`,
+        ...(typeof (entry as Record<string, unknown>).enabled === 'boolean' ? { enabled: (entry as Record<string, unknown>).enabled === true } : {}),
         jiraProjectKey: normalizeStoredProjectKey((entry as Record<string, unknown>).jiraProjectKey) ?? '',
         ...(normalizeOptionalString((entry as Record<string, unknown>).jiraJql) ? { jiraJql: normalizeOptionalString((entry as Record<string, unknown>).jiraJql) } : {}),
         ...(entry && typeof entry === 'object' && (entry as Record<string, unknown>).filters ? { filters: normalizeTaskFilters((entry as Record<string, unknown>).filters) } : {})
@@ -4551,6 +4717,7 @@ async function persistProjectRegistration(
       if (inferredRepository) {
         projectConfig.mappings = [{
           id: 'mapping-1',
+          enabled: true,
           jiraProjectKey: inferredRepository
         }];
       }
@@ -4817,6 +4984,24 @@ const plugin = definePlugin({
         return {
           suggestions: []
         };
+      }
+    });
+
+    ctx.data.register('sync.upstreamProjects.search', async (input) => {
+      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const providerId = normalizeOptionalString(record.providerId);
+      const query = normalizeOptionalString(record.query) ?? '';
+      if (!providerId) {
+        return { suggestions: [] } satisfies UpstreamProjectSearchResult;
+      }
+
+      try {
+        const providerType = await getProviderTypeById(ctx, providerId);
+        return {
+          suggestions: await searchProviderProjects(ctx, providerType, providerId, query)
+        } satisfies UpstreamProjectSearchResult;
+      } catch {
+        return { suggestions: [] } satisfies UpstreamProjectSearchResult;
       }
     });
 
@@ -5157,6 +5342,28 @@ const plugin = definePlugin({
       };
     });
 
+    ctx.actions.register('sync.cleanupImportedIssues', async (input) => {
+      const record = normalizeInputRecord(input);
+      const companyId = normalizeCompanyId(record.companyId);
+      const issueIds = Array.isArray(record.issueIds)
+        ? record.issueIds.map((issueId) => normalizeOptionalString(issueId)).filter((issueId): issueId is string => Boolean(issueId))
+        : [];
+      if (!companyId) {
+        throw new Error('A company id is required to clean up imported issues.');
+      }
+      if (issueIds.length === 0) {
+        return {
+          count: 0,
+          message: 'No imported issues were selected.'
+        };
+      }
+
+      return {
+        count: issueIds.length,
+        message: `Selected ${issueIds.length} imported issue${issueIds.length === 1 ? '' : 's'} for cleanup.`
+      };
+    });
+
     ctx.actions.register('issue.pushToJira', async (input) => {
       const record = normalizeInputRecord(input);
       const companyId = normalizeCompanyId(record.companyId);
@@ -5254,7 +5461,7 @@ const plugin = definePlugin({
   async onHealth() {
     return {
       status: 'ok',
-      message: 'Issue Sync plugin ready'
+      message: 'External Issue Sync plugin ready'
     };
   }
 });
