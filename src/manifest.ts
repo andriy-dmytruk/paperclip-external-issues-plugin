@@ -17,8 +17,8 @@ export const manifest: PaperclipPluginManifestV1 = {
   id: 'paperclip-jira-plugin',
   apiVersion: 1,
   version: MANIFEST_VERSION,
-  displayName: 'Issue Sync',
-  description: 'Synchronize external issues into Paperclip projects and sync issue/comment changes both ways.',
+  displayName: 'External Issue Sync',
+  description: 'Synchronize Jira Data Center, Jira Cloud, or GitHub issues into Paperclip.',
   author: 'Andriy Dmytruk',
   categories: ['connector', 'ui'],
   capabilities: [
@@ -106,34 +106,34 @@ export const manifest: PaperclipPluginManifestV1 = {
       {
         type: 'dashboardWidget',
         id: 'paperclip-jira-plugin-dashboard-widget',
-        displayName: 'Issue Sync',
+        displayName: 'External Issue Sync',
         exportName: 'JiraSyncDashboardWidget'
       },
       {
         type: 'taskDetailView',
         id: 'paperclip-jira-plugin-task-detail-view',
-        displayName: 'Issue Sync',
+        displayName: 'External Issue Sync',
         exportName: 'JiraSyncIssueTaskDetailView',
         entityTypes: ['issue']
       },
       {
         type: 'commentAnnotation',
         id: 'paperclip-jira-plugin-comment-annotation',
-        displayName: 'Jira Comment Sync',
+        displayName: 'External Issue Comment Sync',
         exportName: 'JiraSyncCommentAnnotation',
         entityTypes: ['comment']
       },
       {
         type: 'settingsPage',
         id: 'paperclip-jira-plugin-settings-page',
-        displayName: 'Issue Sync',
+        displayName: 'External Issue Sync',
         exportName: 'JiraSyncSettingsPage'
       }
     ],
     launchers: [
       {
         id: 'paperclip-jira-plugin-entity-launcher',
-        displayName: 'Sync Issues',
+        displayName: 'External Issue Sync',
         placementZone: 'toolbarButton',
         entityTypes: ['project'],
         action: {

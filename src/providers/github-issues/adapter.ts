@@ -20,5 +20,15 @@ export const githubIssuesProviderAdapter: SyncProviderAdapter<GitHubIssuesProvid
     }
 
     return null;
+  },
+  async listUpstreamProjects(context, config, query) {
+    const lister = (context as {
+      listUpstreamProjects?: (providerType: 'github_issues', config: GitHubIssuesProviderConfig, query?: string) => Promise<Array<{ id: string; key: string; displayName: string; url?: string }>>;
+    }).listUpstreamProjects;
+    if (!lister) {
+      return [];
+    }
+
+    return await lister('github_issues', config, query);
   }
 };

@@ -1,6 +1,6 @@
 # External Issues plugin specification
 
-Issue Sync is a Paperclip plugin for synchronizing external issues into Paperclip projects while keeping Paperclip usable as the primary planning surface. The published npm package is `paperclip-external-issues-plugin`, while the Paperclip plugin id remains `paperclip-jira-plugin` for install and state compatibility.
+External Issue Sync is a Paperclip plugin for synchronizing external issues into Paperclip projects while keeping Paperclip usable as the primary planning surface. The published npm package is `paperclip-external-issues-plugin`, while the Paperclip plugin id remains `paperclip-jira-plugin` for install and state compatibility.
 
 ## MVP requirements
 
@@ -15,6 +15,7 @@ Issue Sync is a Paperclip plugin for synchronizing external issues into Papercli
 - Successful provider tests and successful sync fetches SHOULD update provider health to `Connected`, while failed provider tests or failed upstream sync fetches SHOULD update provider health to `Degraded`.
 - The sync center MUST let a Paperclip project explicitly choose `Provider: None` without falling back to the first saved Jira provider.
 - Before a provider is selected for a project, the sync center MUST hide provider-specific project settings and sync actions while keeping `Hide imported issues` available.
+- Project-scoped sync settings MUST be organized into tabs for essential configuration, agent access, project mappings, and status mapping, while sync actions and sync status remain visible at the bottom of the project page.
 - The sync flow MUST import Jira issues into the selected Paperclip project's configured Jira mappings.
 - Imported issues MUST retain the original Jira key as hidden durable metadata in the Paperclip issue description.
 - Synced issues MUST use a stable upstream-key title prefix fallback such as `[GRB-123]` so synced/local state stays visible even without host row styling.
@@ -31,6 +32,7 @@ Issue Sync is a Paperclip plugin for synchronizing external issues into Papercli
 - The dashboard widget MUST summarize configured project mappings, linked issue count, and last sync state.
 - Manual sync MUST report processed, total, imported, updated, skipped, and failed counts when available.
 - Jira sync settings MUST be saved per Paperclip project, including selected provider, default assignee, default Jira-to-Paperclip status mapping, scheduled cadence, and that project's Jira mappings.
+- When a project has a real provider selected, the essential configuration tab MUST require a default upstream project key or repository and MUST maintain that value as the primary mapping automatically.
 - When a Paperclip project already carries a GitHub repository binding, GitHub issue sync SHOULD prefill or infer the repository mapping from that project binding before asking the user to type it again.
 - GitHub issue sync SHOULD preserve upstream close reasons such as `Completed`, `Not planned`, and `Duplicate` as distinct upstream statuses while still treating them as part of the closed family for default local status mapping.
 - Project sync settings MUST support explicit Jira-to-Paperclip status mappings so Jira status changes can update the local Paperclip workflow status when configured.

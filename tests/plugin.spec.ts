@@ -852,7 +852,14 @@ test('project-first sync data contracts expose entry, project, and provider page
     providerId?: string | null;
     providerType?: string;
     backTarget?: string;
-    fields?: { name?: string };
+    fields?: { name?: string; jiraBaseUrl?: string; defaultIssueType?: string };
+    draft?: {
+      id?: string;
+      type?: string;
+      name?: string;
+      jiraBaseUrl?: string;
+      defaultIssueType?: string;
+    };
   }>('settings.providerDetail', {
     companyId: 'company-1',
     providerId: 'provider-default-jira'
@@ -883,6 +890,12 @@ test('project-first sync data contracts expose entry, project, and provider page
   assert.equal(providerDetail.providerType, 'jira_dc');
   assert.equal(providerDetail.backTarget, 'providers');
   assert.equal(providerDetail.fields?.name, 'Default Jira');
+  assert.equal(providerDetail.fields?.jiraBaseUrl, 'https://jira.example.com');
+  assert.equal(providerDetail.fields?.defaultIssueType, 'Task');
+  assert.equal(providerDetail.draft?.id, 'provider-default-jira');
+  assert.equal(providerDetail.draft?.type, 'jira_dc');
+  assert.equal(providerDetail.draft?.name, 'Default Jira');
+  assert.equal(providerDetail.draft?.jiraBaseUrl, 'https://jira.example.com');
 });
 
 test('sync popup excludes archived Paperclip projects from project selection', async () => {
@@ -912,6 +925,58 @@ test('sync popup excludes archived Paperclip projects from project selection', a
     popupState.availableProjects.map((project) => project.id),
     ['project-1']
   );
+});
+
+test('settings.providerDetail backfills GitHub default repository from saved mappings', async () => {
+  const harness = createTestHarness({
+    manifest,
+    config: {
+      providers: [
+        {
+          id: 'provider-github',
+          type: 'github_issues',
+          name: 'GitHub',
+          githubApiBaseUrl: 'https://api.github.com',
+          githubToken: 'github-token'
+        }
+      ]
+    } as any
+  });
+  await plugin.definition.setup(harness.ctx);
+
+  harness.seed({
+    projects: [makeProject({ id: 'project-1', name: 'Alpha' })]
+  });
+
+  await harness.performAction('settings.saveRegistration', {
+    companyId: 'company-1',
+    projectId: 'project-1',
+    projectName: 'Alpha',
+    providerId: 'provider-github',
+    mappings: [
+      {
+        providerId: 'provider-github',
+        jiraProjectKey: 'owner/repo',
+        paperclipProjectId: 'project-1',
+        paperclipProjectName: 'Alpha'
+      }
+    ]
+  });
+
+  const providerDetail = await harness.getData<{
+    providerType?: string;
+    fields?: {
+      defaultRepository?: string;
+      githubApiBaseUrl?: string;
+    };
+  }>('settings.providerDetail', {
+    companyId: 'company-1',
+    providerId: 'provider-github'
+  });
+
+  assert.equal(providerDetail.providerType, 'github_issues');
+  assert.equal(providerDetail.fields?.githubApiBaseUrl, 'https://api.github.com');
+  assert.equal(providerDetail.fields?.defaultRepository, 'owner/repo');
 });
 
 test('sync.provider.testConnection records provider test status', async () => {
@@ -2062,6 +2127,83 @@ test('sync.runNow maps GitHub closed reasons to done by default', async () => {
     assert.equal(importedIssues[0]?.title, '[ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1] Closed GitHub issue');
     assert.equal(presentation.upstreamStatus?.name, 'Duplicate');
     assert.equal(presentation.upstreamStatus?.category, 'Done');
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('sync.runNow does not duplicate GitHub title prefixes when upstream title already includes one', async () => {
+  const restoreFetch = installMockFetch(async (input) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/repos/owner/repo/issues?state=all&per_page=50')) {
+      return jsonResponse([
+        {
+          id: 4,
+          number: 4,
+          title: '[owner/repo#4] Test issue 4',
+          body: 'Imported from GitHub',
+          state: 'open',
+          html_url: 'https://github.com/owner/repo/issues/4',
+          user: {
+            login: 'octocat'
+          },
+          created_at: '2026-04-21T13:03:54.000Z',
+          updated_at: '2026-04-21T13:08:38.000Z'
+        }
+      ]);
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  try {
+    const harness = createTestHarness({
+      manifest,
+      config: {
+        providers: [
+          {
+            id: 'provider-github',
+            type: 'github_issues',
+            name: 'GitHub',
+            githubApiBaseUrl: 'https://api.github.com',
+            githubToken: 'github-token',
+            defaultRepository: 'owner/repo',
+            defaultIssueType: 'Task'
+          }
+        ]
+      } as any
+    });
+    await plugin.definition.setup(harness.ctx);
+
+    harness.seed({
+      projects: [makeProject({ id: 'project-1', name: 'Alpha' })]
+    });
+
+    await harness.performAction('settings.saveRegistration', {
+      companyId: 'company-1',
+      projectId: 'project-1',
+      projectName: 'Alpha',
+      providerId: 'provider-github',
+      mappings: [
+        {
+          providerId: 'provider-github',
+          jiraProjectKey: 'owner/repo',
+          paperclipProjectId: 'project-1',
+          paperclipProjectName: 'Alpha'
+        }
+      ]
+    });
+
+    const syncState = await harness.performAction<{ status: string }>('sync.runNow', {
+      companyId: 'company-1'
+    });
+    const importedIssues = await harness.ctx.issues.list({
+      companyId: 'company-1',
+      projectId: 'project-1'
+    });
+
+    assert.equal(syncState.status, 'success');
+    assert.equal(importedIssues[0]?.title, '[owner/repo#4] Test issue 4');
   } finally {
     restoreFetch();
   }

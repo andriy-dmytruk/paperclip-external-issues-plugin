@@ -45,5 +45,15 @@ export const jiraCloudProviderAdapter: SyncProviderAdapter<JiraCloudProviderConf
     }
 
     return await tester(config);
+  },
+  async listUpstreamProjects(context, config, query) {
+    const lister = (context as {
+      listUpstreamProjects?: (providerType: 'jira_cloud', config: JiraCloudProviderConfig, query?: string) => Promise<Array<{ id: string; key: string; displayName: string; url?: string }>>;
+    }).listUpstreamProjects;
+    if (!lister) {
+      return [];
+    }
+
+    return await lister('jira_cloud', config, query);
   }
 };

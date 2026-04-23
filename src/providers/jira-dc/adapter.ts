@@ -42,5 +42,15 @@ export const jiraDcProviderAdapter: SyncProviderAdapter<JiraDcProviderConfig> = 
     }
 
     return await tester(config);
+  },
+  async listUpstreamProjects(context, config, query) {
+    const lister = (context as {
+      listUpstreamProjects?: (providerType: 'jira_dc', config: JiraDcProviderConfig, query?: string) => Promise<Array<{ id: string; key: string; displayName: string; url?: string }>>;
+    }).listUpstreamProjects;
+    if (!lister) {
+      return [];
+    }
+
+    return await lister('jira_dc', config, query);
   }
 };

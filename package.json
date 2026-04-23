@@ -1,7 +1,7 @@
 {
   "name": "paperclip-external-issues-plugin",
   "version": "0.1.1",
-  "description": "Paperclip plugin for synchronizing external issues from Jira Data Center, Jira Cloud, and GitHub Issues.",
+  "description": "Paperclip plugin for synchronizing Jira Data Center, Jira Cloud, or GitHub issues into Paperclip.",
   "author": "Andriy Dmytruk",
   "contributors": [
     "Álvaro Sánchez-Mariscal"
@@ -24,8 +24,13 @@
     "paperclip",
     "plugin",
     "issues",
+    "issue-sync",
+    "issue-tracker",
     "jira",
+    "jira data center",
+    "jira cloud",
     "github",
+    "github issues",
     "sync"
   ],
   "files": [

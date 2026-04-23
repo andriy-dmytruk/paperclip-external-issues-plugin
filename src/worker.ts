@@ -864,6 +864,31 @@ function getProjectConfig(
   )) ?? null;
 }
 
+function inferDefaultUpstreamKeyFromMappings(
+  settings: JiraSyncSettings,
+  companyId: string | undefined,
+  providerId: string | undefined,
+  providerType: ProviderType
+): string | null {
+  if (!providerId) {
+    return null;
+  }
+
+  const mappings = getMappingsForCompany(settings, companyId)
+    .filter((mapping) => mapping.providerId === providerId)
+    .filter((mapping) => mapping.jiraProjectKey.trim().length > 0);
+  if (mappings.length === 0) {
+    return null;
+  }
+
+  if (isGitHubProviderType(providerType)) {
+    const githubMapping = mappings.find((mapping) => mapping.jiraProjectKey.includes('/')) ?? mappings[0];
+    return githubMapping?.jiraProjectKey?.trim() ?? null;
+  }
+
+  return mappings[0]?.jiraProjectKey?.trim() ?? null;
+}
+
 function resolveMappedPaperclipState(
   projectConfig: JiraProjectSyncConfig | null,
   jiraStatusName: string
@@ -1685,30 +1710,49 @@ async function listGitHubRepositories(
   query?: string
 ): Promise<CanonicalUpstreamProject[]> {
   const trimmedQuery = query?.trim().toLowerCase() ?? '';
-  const repositories = await githubApiCall(ctx, config, async (api) => await api.rest.repos.listForAuthenticatedUser({
-    sort: 'updated',
-    per_page: 100,
-    affiliation: 'owner,collaborator,organization_member'
-  }));
+  const suggestionLimit = 20;
+  const pageSize = 100;
+  const maxPages = trimmedQuery ? 10 : 1;
+  const seenRepoKeys = new Set<string>();
+  const suggestions: CanonicalUpstreamProject[] = [];
 
-  const suggestions = repositories.data
-    .filter((repo) => {
-      const fullName = repo.full_name?.toLowerCase() ?? '';
-      const name = repo.name?.toLowerCase() ?? '';
-      const htmlUrl = repo.html_url?.toLowerCase() ?? '';
-      if (!trimmedQuery) {
-        return true;
+  for (let page = 1; page <= maxPages; page += 1) {
+    const repositories = await githubApiCall(ctx, config, async (api) => await api.rest.repos.listForAuthenticatedUser({
+      sort: 'updated',
+      per_page: pageSize,
+      page,
+      affiliation: 'owner,collaborator,organization_member'
+    }));
+    const pageItems = repositories.data;
+    for (const repo of pageItems) {
+      const fullName = repo.full_name?.trim() ?? '';
+      if (!fullName || seenRepoKeys.has(fullName.toLowerCase())) {
+        continue;
       }
-      return fullName.includes(trimmedQuery) || name.includes(trimmedQuery) || htmlUrl.includes(trimmedQuery);
-    })
-    .slice(0, 20)
-    .map((repo) => ({
-      id: String(repo.id),
-      key: repo.full_name ?? '',
-      displayName: repo.full_name ?? repo.name ?? 'Repository',
-      ...(repo.html_url ? { url: repo.html_url } : {})
-    }))
-    .filter((repo) => repo.key.trim().length > 0);
+
+      const repoName = repo.name?.toLowerCase() ?? '';
+      const repoUrl = repo.html_url?.toLowerCase() ?? '';
+      const fullNameLower = fullName.toLowerCase();
+      if (trimmedQuery && !fullNameLower.includes(trimmedQuery) && !repoName.includes(trimmedQuery) && !repoUrl.includes(trimmedQuery)) {
+        continue;
+      }
+
+      seenRepoKeys.add(fullNameLower);
+      suggestions.push({
+        id: String(repo.id),
+        key: fullName,
+        displayName: fullName,
+        ...(repo.html_url ? { url: repo.html_url } : {})
+      });
+      if (suggestions.length >= suggestionLimit) {
+        break;
+      }
+    }
+
+    if (suggestions.length >= suggestionLimit || pageItems.length < pageSize) {
+      break;
+    }
+  }
 
   if (suggestions.length > 0) {
     return suggestions;
@@ -2350,7 +2394,16 @@ function buildJiraSearchJql(mapping: JiraMapping, filters?: JiraTaskFilters): st
 }
 
 function stripIssueTitlePrefix(title: string): string {
-  return title.replace(/^\[[A-Z][A-Z0-9]+-\d+\]\s*/i, '').trim();
+  let next = title.trim();
+  const jiraPrefixPattern = /^\[[A-Z][A-Z0-9]+-\d+\]\s*/i;
+  const githubPrefixPattern = /^\[[a-z0-9_.-]+\/[a-z0-9_.-]+#\d+\]\s*/i;
+  while (jiraPrefixPattern.test(next) || githubPrefixPattern.test(next)) {
+    next = next
+      .replace(jiraPrefixPattern, '')
+      .replace(githubPrefixPattern, '')
+      .trim();
+  }
+  return next;
 }
 
 function ensureIssueTitlePrefix(title: string, jiraIssueKey: string): string {
@@ -3886,34 +3939,82 @@ async function buildProviderDetailData(
   providerId?: string
 ): Promise<Record<string, unknown>> {
   const settings = normalizeSettings(await ctx.state.get(SETTINGS_SCOPE));
+  const rawConfig = await ctx.config.get();
+  const rawConfigRecord = rawConfig && typeof rawConfig === 'object' ? rawConfig as Record<string, unknown> : {};
   const providers = await getAvailableProviders(ctx);
   const selectedProvider = providerId ? providers.find((provider) => provider.id === providerId) ?? null : null;
   const config = selectedProvider ? await getProviderDisplayConfig(ctx, selectedProvider.id) : null;
+  const inferredDefaultUpstreamKey = selectedProvider
+    ? inferDefaultUpstreamKeyFromMappings(settings, companyId, selectedProvider.id, selectedProvider.type)
+    : null;
+  const legacyJiraBaseUrl = normalizeOptionalString(rawConfigRecord.jiraBaseUrl);
+  const legacyJiraUserEmail = normalizeOptionalString(rawConfigRecord.jiraUserEmail);
+  const legacyJiraDefaultIssueType = normalizeOptionalString(rawConfigRecord.defaultIssueType);
+  const draftProvider =
+    selectedProvider
+      ? (isJiraProviderType(selectedProvider.type)
+          ? {
+              id: selectedProvider.id,
+              type: selectedProvider.type,
+              name: selectedProvider.name,
+              jiraBaseUrl: (selectedProvider as JiraDcProviderConfig | JiraCloudProviderConfig).jiraBaseUrl
+                ?? legacyJiraBaseUrl
+                ?? '',
+              jiraUserEmail: (selectedProvider as JiraDcProviderConfig | JiraCloudProviderConfig).jiraUserEmail
+                ?? legacyJiraUserEmail
+                ?? '',
+              defaultIssueType: (selectedProvider as JiraDcProviderConfig | JiraCloudProviderConfig).defaultIssueType
+                ?? legacyJiraDefaultIssueType
+                ?? DEFAULT_ISSUE_TYPE
+            }
+          : {
+              id: selectedProvider.id,
+              type: 'github_issues' as const,
+              name: selectedProvider.name,
+              githubApiBaseUrl: (selectedProvider as GitHubIssuesProviderConfig).githubApiBaseUrl ?? DEFAULT_GITHUB_API_BASE_URL,
+              defaultRepository: (selectedProvider as GitHubIssuesProviderConfig).defaultRepository ?? inferredDefaultUpstreamKey ?? ''
+            })
+      : {
+          id: providerId ?? DEFAULT_PROVIDER_ID,
+          type: 'jira_dc' as const,
+          name: '',
+          jiraBaseUrl: legacyJiraBaseUrl ?? '',
+          jiraUserEmail: legacyJiraUserEmail ?? '',
+          defaultIssueType: legacyJiraDefaultIssueType ?? DEFAULT_ISSUE_TYPE
+        };
+  const draftRecord = draftProvider as Record<string, unknown>;
+  const draftName = normalizeOptionalString(draftRecord.name) ?? '';
+  const draftJiraBaseUrl = normalizeOptionalString(draftRecord.jiraBaseUrl) ?? '';
+  const draftJiraUserEmail = normalizeOptionalString(draftRecord.jiraUserEmail) ?? '';
+  const draftDefaultIssueType = normalizeOptionalString(draftRecord.defaultIssueType) ?? DEFAULT_ISSUE_TYPE;
+  const draftGitHubApiBaseUrl = normalizeOptionalString(draftRecord.githubApiBaseUrl) ?? DEFAULT_GITHUB_API_BASE_URL;
+  const draftDefaultRepository = normalizeOptionalString(draftRecord.defaultRepository) ?? '';
   const connectionTest = selectedProvider ? getConnectionTestStateForCompany(settings, companyId, selectedProvider.id) : { status: 'idle' as const };
   return {
     mode: selectedProvider ? 'edit' : 'create',
     providerId: selectedProvider?.id ?? null,
     providerType: selectedProvider?.type ?? 'jira_dc',
+    draft: draftProvider,
     fields: selectedProvider
       ? (isJiraProviderType(selectedProvider.type)
           ? {
-              name: selectedProvider.name,
-              jiraBaseUrl: (selectedProvider as JiraDcProviderConfig | JiraCloudProviderConfig).jiraBaseUrl ?? '',
-              jiraUserEmail: (selectedProvider as JiraDcProviderConfig | JiraCloudProviderConfig).jiraUserEmail ?? '',
-              defaultIssueType: (selectedProvider as JiraDcProviderConfig | JiraCloudProviderConfig).defaultIssueType ?? DEFAULT_ISSUE_TYPE
+              name: draftName,
+              jiraBaseUrl: draftJiraBaseUrl,
+              jiraUserEmail: draftJiraUserEmail,
+              defaultIssueType: draftDefaultIssueType
             }
           : {
-              name: selectedProvider.name,
-              githubApiBaseUrl: (selectedProvider as GitHubIssuesProviderConfig).githubApiBaseUrl ?? DEFAULT_GITHUB_API_BASE_URL,
-              defaultRepository: (selectedProvider as GitHubIssuesProviderConfig).defaultRepository ?? ''
+              name: draftName,
+              githubApiBaseUrl: draftGitHubApiBaseUrl,
+              defaultRepository: draftDefaultRepository
             })
       : {
-          name: '',
-          jiraBaseUrl: '',
-          jiraUserEmail: '',
-          defaultIssueType: DEFAULT_ISSUE_TYPE,
-          githubApiBaseUrl: DEFAULT_GITHUB_API_BASE_URL,
-          defaultRepository: ''
+          name: draftName,
+          jiraBaseUrl: draftJiraBaseUrl,
+          jiraUserEmail: draftJiraUserEmail,
+          defaultIssueType: draftDefaultIssueType,
+          githubApiBaseUrl: draftGitHubApiBaseUrl,
+          defaultRepository: draftDefaultRepository
         },
     tokenSaved: Boolean(config?.tokenSaved),
     healthStatus:

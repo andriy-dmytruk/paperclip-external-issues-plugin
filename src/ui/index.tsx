@@ -39,6 +39,7 @@ import {
 type MappingRow = {
   id: string;
   providerId: string;
+  enabled?: boolean;
   jiraProjectKey: string;
   jiraJql: string;
   paperclipProjectId: string;
@@ -73,6 +74,8 @@ type AgentIssueProviderAccess = {
   allowedAgentIds: string[];
 };
 
+type ProjectSettingsTabId = 'essential' | 'agent-access' | 'mappings' | 'status-mapping';
+
 type SyncProgressState = {
   status: 'idle' | 'running' | 'success' | 'error';
   message?: string;
@@ -104,6 +107,7 @@ type PopupState = {
   mappings: Array<{
     id: string;
     providerId?: string;
+    enabled?: boolean;
     jiraProjectKey: string;
     jiraJql?: string;
     paperclipProjectId?: string;
@@ -187,6 +191,16 @@ type PopupState = {
     defaultStatusAssigneeAgentId?: string | null;
     statusMappings?: StatusMappingRow[];
     scheduleFrequencyMinutes?: number;
+    mappings?: Array<{
+      id: string;
+      providerId?: string;
+      enabled?: boolean;
+      jiraProjectKey: string;
+      jiraJql?: string;
+      paperclipProjectId?: string;
+      paperclipProjectName: string;
+      filters?: TaskFilters;
+    }>;
     suggestedUpstreamProjectKeys?: Partial<Record<ProviderType, string>>;
   } | null;
 };
@@ -272,6 +286,17 @@ type CleanupCandidate = {
 
 type JiraUserSearchData = {
   suggestions: JiraUserReference[];
+};
+
+type UpstreamProjectSuggestion = {
+  id: string;
+  key: string;
+  displayName: string;
+  url?: string;
+};
+
+type UpstreamProjectSearchData = {
+  suggestions: UpstreamProjectSuggestion[];
 };
 
 function cardStyle(): React.CSSProperties {
@@ -658,6 +683,27 @@ function sectionCardStyle(): React.CSSProperties {
   };
 }
 
+function tabListStyle(): React.CSSProperties {
+  return {
+    display: 'flex',
+    gap: 8,
+    flexWrap: 'wrap'
+  };
+}
+
+function tabButtonStyle(selected = false): React.CSSProperties {
+  return {
+    borderRadius: 999,
+    padding: '7px 12px',
+    border: '1px solid var(--border)',
+    background: selected ? 'color-mix(in srgb, currentColor 8%, transparent)' : 'transparent',
+    color: 'inherit',
+    cursor: 'pointer',
+    fontSize: 13,
+    fontWeight: selected ? 600 : 500
+  };
+}
+
 function healthBadgeStyle(status?: string | null): React.CSSProperties {
   if (status === 'connected') {
     return badgeStyle('synced');
@@ -880,18 +926,6 @@ function createEmptyProviderDraft(type: ProviderType = PROVIDER_TYPE_OPTIONS[0])
   };
 }
 
-function getProviderBaseUrl(provider: JiraProviderConfig | null | undefined): string {
-  return provider && isJiraProviderType(provider.type) ? (provider.jiraBaseUrl ?? '') : '';
-}
-
-function getProviderUserEmail(provider: JiraProviderConfig | null | undefined): string {
-  return provider && isJiraProviderType(provider.type) ? (provider.jiraUserEmail ?? '') : '';
-}
-
-function getProviderDefaultIssueType(provider: JiraProviderConfig | null | undefined): string {
-  return provider && isJiraProviderType(provider.type) ? (provider.defaultIssueType ?? DEFAULT_JIRA_ISSUE_TYPE) : DEFAULT_JIRA_ISSUE_TYPE;
-}
-
 function getProviderTokenRef(provider: JiraProviderConfig | null | undefined): string | undefined {
   if (!provider) {
     return undefined;
@@ -930,12 +964,12 @@ function getProviderPlatformName(providerType?: ProviderType | string | null): s
 
 function getProviderProjectLabel(providerType?: ProviderType | string | null): string {
   const normalized = normalizeProviderType(providerType);
-  return isGitHubProviderType(normalized) ? 'GitHub repository URL' : 'Jira project key';
+  return isGitHubProviderType(normalized) ? 'GitHub repository (owner/repo)' : 'Jira project key';
 }
 
 function getProviderProjectPlaceholder(providerType?: ProviderType | string | null): string {
   const normalized = normalizeProviderType(providerType);
-  return isGitHubProviderType(normalized) ? 'https://github.com/owner/repo' : 'GRB';
+  return isGitHubProviderType(normalized) ? 'owner/repo' : 'GRB';
 }
 
 function getSuggestedUpstreamProjectKey(
@@ -955,6 +989,29 @@ function getSuggestedUpstreamProjectKey(
 
 function getProviderStatusLabel(providerType?: ProviderType | string | null): string {
   return `${getProviderPlatformName(providerType)} issue status`;
+}
+
+function getDefaultStatusMappingRowsForProviderType(providerType?: ProviderType | string | null): StatusMappingRow[] {
+  if (isGitHubProviderType(normalizeProviderType(providerType))) {
+    return [{
+      id: 'status-mapping-default-closed',
+      jiraStatus: 'Closed',
+      paperclipStatus: 'done',
+      assigneeAgentId: ''
+    }];
+  }
+
+  return [{
+    id: 'status-mapping-default-closed',
+    jiraStatus: 'Closed',
+    paperclipStatus: 'done',
+    assigneeAgentId: ''
+  }, {
+    id: 'status-mapping-default-done',
+    jiraStatus: 'Done',
+    paperclipStatus: 'done',
+    assigneeAgentId: ''
+  }];
 }
 
 function getProviderUsersPlaceholder(providerType?: ProviderType | string | null): string {
@@ -1017,6 +1074,7 @@ function createEmptyMappingRow(providerId = '', defaultAssignee?: JiraUserRefere
   return {
     id: `mapping-${Math.random().toString(36).slice(2, 10)}`,
     providerId,
+    enabled: true,
     jiraProjectKey: '',
     jiraJql: '',
     paperclipProjectId: '',
@@ -1205,6 +1263,119 @@ function JiraUserAutocomplete(props: {
   );
 }
 
+function UpstreamProjectAutocomplete(props: {
+  companyId: string;
+  providerId?: string | null;
+  providerType?: ProviderType | null;
+  label: string;
+  hideLabel?: boolean;
+  value: string;
+  placeholder?: string;
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}): React.JSX.Element {
+  const [query, setQuery] = useState(props.value);
+  const [open, setOpen] = useState(false);
+  const debouncedQuery = useDebouncedValue(query, 250);
+  const search = usePluginData<UpstreamProjectSearchData>('sync.upstreamProjects.search', {
+    companyId: props.companyId,
+    providerId: props.providerId ?? undefined,
+    query: props.providerId ? debouncedQuery : ''
+  });
+
+  useEffect(() => {
+    if (props.value !== query) {
+      setQuery(props.value);
+    }
+  }, [props.value]);
+
+  const suggestions = search.data?.suggestions ?? [];
+  const canSearch = Boolean(props.providerId && !props.disabled);
+
+  return (
+    <label style={{ ...stackStyle(6), position: 'relative', zIndex: open ? 80 : 1 }}>
+      {props.hideLabel ? null : <span style={{ fontSize: 13, fontWeight: 600 }}>{props.label}</span>}
+      <input
+        style={inputStyle()}
+        value={query}
+        disabled={props.disabled}
+        placeholder={props.placeholder}
+        onFocus={() => setOpen(true)}
+        onBlur={() => {
+          window.setTimeout(() => {
+            setOpen(false);
+            setQuery(props.value);
+          }, 120);
+        }}
+        onChange={(event) => {
+          const nextValue = event.target.value;
+          setQuery(nextValue);
+          props.onChange(nextValue);
+          if (!open) {
+            setOpen(true);
+          }
+        }}
+      />
+      {open && canSearch ? (
+        <div style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          top: 'calc(100% + 4px)',
+          zIndex: 120,
+          ...panelStyle(),
+          background: 'var(--card, Canvas)',
+          border: '1px solid color-mix(in srgb, var(--border) 96%, transparent)',
+          boxShadow: '0 22px 44px rgba(15, 23, 42, 0.24)',
+          display: 'grid',
+          gap: 4,
+          maxHeight: 220,
+          overflowY: 'auto',
+          padding: 8
+        }}
+        >
+          {search.loading ? (
+            <div style={{ fontSize: 12, opacity: 0.72 }}>
+              {`Searching ${getProviderMappingSummaryNoun(props.providerType)}s…`}
+            </div>
+          ) : suggestions.length > 0 ? suggestions.map((suggestion) => (
+            <button
+              key={suggestion.id}
+              type="button"
+              style={{
+                borderRadius: 12,
+                border: '1px solid color-mix(in srgb, var(--border) 88%, transparent)',
+                background: 'transparent',
+                color: 'inherit',
+                padding: '8px 10px',
+                textAlign: 'left',
+                display: 'grid',
+                gap: 2,
+                cursor: 'pointer'
+              }}
+              onMouseDown={(event) => {
+                event.preventDefault();
+                props.onChange(suggestion.key);
+                setQuery(suggestion.key);
+                setOpen(false);
+              }}
+            >
+              <span>{suggestion.displayName}</span>
+              <span style={{ fontSize: 12, opacity: 0.72 }}>
+                {isGitHubProviderType(props.providerType) ? (suggestion.url ?? suggestion.key) : suggestion.key}
+              </span>
+            </button>
+          )) : (
+            <div style={{ fontSize: 12, opacity: 0.72 }}>
+              No {getProviderMappingSummaryNoun(props.providerType)}s match this search yet.
+            </div>
+          )}
+        </div>
+      ) : null}
+    </label>
+  );
+}
+
 function ResultMessage(props: {
   message?: string | null;
   tone?: 'default' | 'success' | 'error';
@@ -1247,7 +1418,7 @@ function useActionRunner<TParams extends Record<string, unknown>>(actionKey: str
       setMessage(nextMessage);
       setTone('success');
       toast({
-        title: 'Issue Sync',
+        title: 'External Issue Sync',
         body: nextMessage,
         tone: 'success'
       });
@@ -1257,7 +1428,7 @@ function useActionRunner<TParams extends Record<string, unknown>>(actionKey: str
       setMessage(nextMessage);
       setTone('error');
       toast({
-        title: 'Issue Sync',
+        title: 'External Issue Sync',
         body: nextMessage,
         tone: 'error'
       });
@@ -1273,6 +1444,33 @@ function useActionRunner<TParams extends Record<string, unknown>>(actionKey: str
     message,
     tone
   };
+}
+
+async function hideIssuesInPaperclip(issueIds: string[]): Promise<string[]> {
+  const failedIssueIds: string[] = [];
+  const hiddenAtIso = new Date().toISOString();
+
+  for (const issueId of issueIds) {
+    try {
+      const response = await globalThis.fetch(`/api/issues/${encodeURIComponent(issueId)}`, {
+        method: 'PATCH',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          hidden: true,
+          hiddenAt: hiddenAtIso
+        })
+      });
+      if (!response.ok) {
+        failedIssueIds.push(issueId);
+      }
+    } catch {
+      failedIssueIds.push(issueId);
+    }
+  }
+
+  return failedIssueIds;
 }
 
 function SyncProgressPanel(props: {
@@ -1327,27 +1525,23 @@ function SyncProgressPanel(props: {
 }
 
 function MappingEditor(props: {
+  defaultRow?: MappingRow | null;
   rows: MappingRow[];
   providerType?: ProviderType | null;
   onCreate: () => void;
   onEdit: (rowId: string) => void;
   onRemove: (rowId: string) => void;
+  onToggleEnabled: (rowId: string, enabled: boolean) => void;
+  onToggleDefaultEnabled: (enabled: boolean) => void;
 }): React.JSX.Element {
+  const allRows = [
+    ...(props.defaultRow ? [{ row: props.defaultRow, isDefault: true }] : []),
+    ...props.rows.map((row) => ({ row, isDefault: false }))
+  ];
+
   return (
     <div style={stackStyle(12)}>
-      <div style={rowStyle()}>
-        <div style={{ fontSize: 13, opacity: 0.75 }}>
-          Each mapping defines which upstream project or repository feed this Paperclip project imports from.
-        </div>
-        <button
-          type="button"
-          style={buttonStyle()}
-          onClick={props.onCreate}
-        >
-          Add mapping
-        </button>
-      </div>
-      {props.rows.length === 0 ? (
+      {allRows.length === 0 ? (
         <div style={{ ...sectionCardStyle(), fontSize: 13, opacity: 0.72 }}>
           No mappings yet. Add one to connect this Paperclip project to an upstream issue source.
         </div>
@@ -1361,6 +1555,7 @@ function MappingEditor(props: {
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: 'color-mix(in srgb, var(--muted, #888) 10%, transparent)' }}>
+                <th style={statusMappingHeaderCellStyle()}>Enabled</th>
                 <th style={statusMappingHeaderCellStyle()}>{getProviderProjectLabel(props.providerType)}</th>
                 <th style={statusMappingHeaderCellStyle()}>Rules</th>
                 <th style={statusMappingHeaderCellStyle()}>Creator</th>
@@ -1370,13 +1565,31 @@ function MappingEditor(props: {
               </tr>
             </thead>
             <tbody>
-              {props.rows.map((row) => (
+              {allRows.map(({ row, isDefault }) => (
                 <tr key={row.id}>
+                  <td style={statusMappingCellStyle()}>
+                    <input
+                      type="checkbox"
+                      checked={row.enabled !== false}
+                      onChange={(event) => {
+                        if (isDefault) {
+                          props.onToggleDefaultEnabled(event.target.checked);
+                          return;
+                        }
+                        props.onToggleEnabled(row.id, event.target.checked);
+                      }}
+                    />
+                  </td>
                   <td style={statusMappingCellStyle()}>
                     <div style={stackStyle(4)}>
                       <strong style={{ fontSize: 13 }}>
                         {row.jiraProjectKey || `No ${getProviderProjectLabel(props.providerType).toLowerCase()} selected`}
                       </strong>
+                      {isDefault ? (
+                        <div style={mappingTableMutedTextStyle()}>
+                          Primary mapping managed from the Essential tab.
+                        </div>
+                      ) : null}
                       {!isGitHubProviderType(props.providerType) && row.jiraJql.trim() ? (
                         <div style={mappingTableMutedTextStyle()}>{row.jiraJql}</div>
                       ) : null}
@@ -1400,20 +1613,26 @@ function MappingEditor(props: {
                   </td>
                   <td style={statusMappingCellStyle()}>
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <button
-                        type="button"
-                        style={buttonStyle('secondary')}
-                        onClick={() => props.onEdit(row.id)}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        style={buttonStyle()}
-                        onClick={() => props.onRemove(row.id)}
-                      >
-                        Remove
-                      </button>
+                      {isDefault ? (
+                        <span style={mappingTableMutedTextStyle()}>Managed in Essential tab</span>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            style={buttonStyle('secondary')}
+                            onClick={() => props.onEdit(row.id)}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            style={buttonStyle()}
+                            onClick={() => props.onRemove(row.id)}
+                          >
+                            Remove
+                          </button>
+                        </>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -1422,6 +1641,15 @@ function MappingEditor(props: {
           </table>
         </div>
       )}
+      <div style={rowStyle()}>
+        <button
+          type="button"
+          style={buttonStyle()}
+          onClick={props.onCreate}
+        >
+          Add mapping
+        </button>
+      </div>
     </div>
   );
 }
@@ -1500,6 +1728,16 @@ function SyncCenterSurface(props: {
       defaultStatusAssigneeAgentId?: string | null;
       statusMappings?: StatusMappingRow[];
       scheduleFrequencyMinutes?: number;
+      mappings?: Array<{
+        id: string;
+        providerId?: string;
+        enabled?: boolean;
+        jiraProjectKey: string;
+        jiraJql?: string;
+        paperclipProjectId?: string;
+        paperclipProjectName: string;
+        filters?: TaskFilters;
+      }>;
       suggestedUpstreamProjectKeys?: Partial<Record<ProviderType, string>>;
     } | null;
     navigationContext?: SyncEntryContext | null;
@@ -1507,6 +1745,7 @@ function SyncCenterSurface(props: {
     mappings: Array<{
       id: string;
       providerId?: string;
+      enabled?: boolean;
       jiraProjectKey: string;
       jiraJql?: string;
       paperclipProjectId?: string;
@@ -1540,6 +1779,7 @@ function SyncCenterSurface(props: {
     mode: 'create' | 'edit';
     providerId?: string | null;
     providerType?: ProviderType;
+    draft?: JiraProviderConfig;
     fields?: {
       name?: string;
       jiraBaseUrl?: string;
@@ -1579,6 +1819,7 @@ function SyncCenterSurface(props: {
     mappings: Array<{
       id?: string;
       providerId?: string;
+      enabled?: boolean;
       jiraProjectKey: string;
       jiraJql?: string;
       paperclipProjectId?: string;
@@ -1605,9 +1846,12 @@ function SyncCenterSurface(props: {
     issueId?: string;
   }>('sync.runNow');
   const cleanupCandidates = useActionRunner<{ companyId: string; projectId?: string }>('sync.findCleanupCandidates');
+  const cleanupImportedIssues = useActionRunner<{ companyId: string; issueIds: string[] }>('sync.cleanupImportedIssues');
   const { configJson, saving: configSaving, error: configError, save } = usePluginConfig();
   const [scheduleFrequencyMinutes, setScheduleFrequencyMinutes] = useState(15);
   const [defaultAssignee, setDefaultAssignee] = useState<JiraUserReference | null>(null);
+  const [defaultProjectKey, setDefaultProjectKey] = useState('');
+  const [defaultMappingEnabled, setDefaultMappingEnabled] = useState(true);
   const [defaultStatus, setDefaultStatus] = useState('todo');
   const [defaultStatusAssigneeAgentId, setDefaultStatusAssigneeAgentId] = useState('');
   const [statusMappings, setStatusMappings] = useState<StatusMappingRow[]>([]);
@@ -1615,9 +1859,11 @@ function SyncCenterSurface(props: {
   const [allowedAgentIds, setAllowedAgentIds] = useState<string[]>([]);
   const [rows, setRows] = useState<MappingRow[]>([]);
   const [rowsDirty, setRowsDirty] = useState(false);
+  const [activeProjectTab, setActiveProjectTab] = useState<ProjectSettingsTabId>('essential');
   const [draftTokensByProviderId, setDraftTokensByProviderId] = useState<Record<string, string>>({});
   const [providerDraft, setProviderDraft] = useState<JiraProviderConfig | null>(null);
   const [providerDraftToken, setProviderDraftToken] = useState('');
+  const [providerDraftSourceKey, setProviderDraftSourceKey] = useState<string | null>(null);
   const [newProviderType, setNewProviderType] = useState<ProviderType>(PROVIDER_TYPE_OPTIONS[0]);
   const [mappingModal, setMappingModal] = useState<{
     mode: 'create' | 'edit';
@@ -1687,6 +1933,18 @@ function SyncCenterSurface(props: {
 
     setScheduleFrequencyMinutes(nextProjectPage.projectSettings?.scheduleFrequencyMinutes ?? 15);
     setDefaultAssignee(nextProjectPage.projectSettings?.defaultAssignee ?? null);
+    setDefaultProjectKey(
+      nextProjectPage.projectSettings?.mappings?.[0]?.jiraProjectKey
+      ?? nextProjectPage.mappings?.[0]?.jiraProjectKey
+      ?? getSuggestedUpstreamProjectKey(selectedProvider?.type, nextProjectPage)
+      ?? getSuggestedUpstreamProjectKey(selectedProvider?.type, activeProject)
+      ?? ''
+    );
+    setDefaultMappingEnabled(
+      nextProjectPage.projectSettings?.mappings?.[0]?.enabled
+      ?? nextProjectPage.mappings?.[0]?.enabled
+      ?? true
+    );
     setDefaultStatus(nextProjectPage.projectSettings?.defaultStatus ?? 'todo');
     setDefaultStatusAssigneeAgentId(nextProjectPage.projectSettings?.defaultStatusAssigneeAgentId ?? '');
     setAgentIssueProviderAccessEnabled(nextProjectPage.projectSettings?.agentIssueProviderAccess?.enabled ?? false);
@@ -1700,10 +1958,11 @@ function SyncCenterSurface(props: {
       }))
     );
     setRows(
-      nextProjectPage.mappings.length > 0
-        ? nextProjectPage.mappings.map((mapping) => ({
+      nextProjectPage.mappings.length > 1
+        ? nextProjectPage.mappings.slice(1).map((mapping) => ({
             id: mapping.id,
             providerId: mapping.providerId ?? (nextProjectPage.selectedProviderId ?? ''),
+            enabled: mapping.enabled !== false,
             jiraProjectKey: mapping.jiraProjectKey,
             jiraJql: mapping.jiraJql ?? '',
             paperclipProjectId: mapping.paperclipProjectId ?? '',
@@ -1719,39 +1978,44 @@ function SyncCenterSurface(props: {
         : []
     );
     setRowsDirty(false);
-  }, [activeProjectId, projectPage.data]);
+  }, [activeProject, activeProjectId, projectPage.data, selectedProvider?.type]);
 
   useEffect(() => {
     if (currentPage !== 'provider-detail') {
       return;
     }
 
-    if (!selectedProviderDetailId && providerDraft) {
+    if (selectedProviderDetailId) {
+      const detailDraft = providerDetail.data?.draft;
+      const detailMatches = providerDetail.data?.providerId === selectedProviderDetailId;
+      if (!detailDraft || !detailMatches) {
+        return;
+      }
+
+      const nextSourceKey = `edit:${selectedProviderDetailId}`;
+      if (providerDraftSourceKey === nextSourceKey && providerDraft) {
+        return;
+      }
+
+      setProviderDraft({
+        ...detailDraft,
+        id: detailDraft.id || selectedProviderDetailId,
+        type: detailDraft.type ?? providerDetail.data?.providerType ?? 'jira_dc',
+        name: detailDraft.name ?? ''
+      });
+      setProviderDraftToken('');
+      setProviderDraftSourceKey(nextSourceKey);
       return;
     }
 
-    const detailFields = providerDetail.data?.fields;
-    const existingProvider = selectedProviderDetailId
-      ? configuredProviders.find((provider) => provider.id === selectedProviderDetailId) ?? null
-      : null;
-    setProviderDraft({
-      ...(existingProvider ?? createEmptyProviderDraft(newProviderType)),
-      id: existingProvider?.id ?? selectedProviderDetailId ?? createProviderId(),
-      type: existingProvider?.type ?? providerDetail.data?.providerType ?? newProviderType,
-      name: detailFields?.name ?? existingProvider?.name ?? '',
-      ...(isGitHubProviderType(existingProvider?.type ?? providerDetail.data?.providerType ?? newProviderType)
-        ? {
-            githubApiBaseUrl: detailFields?.githubApiBaseUrl ?? (existingProvider && isGitHubProviderType(existingProvider.type) ? existingProvider.githubApiBaseUrl : '') ?? '',
-            defaultRepository: detailFields?.defaultRepository ?? (existingProvider && isGitHubProviderType(existingProvider.type) ? existingProvider.defaultRepository : '') ?? ''
-          }
-        : {
-            jiraBaseUrl: detailFields?.jiraBaseUrl ?? getProviderBaseUrl(existingProvider) ?? '',
-            jiraUserEmail: detailFields?.jiraUserEmail ?? getProviderUserEmail(existingProvider) ?? '',
-            defaultIssueType: detailFields?.defaultIssueType ?? getProviderDefaultIssueType(existingProvider)
-          })
-    });
+    const nextSourceKey = `new:${newProviderType}`;
+    if (providerDraftSourceKey === nextSourceKey && providerDraft) {
+      return;
+    }
+    setProviderDraft(createEmptyProviderDraft(newProviderType));
     setProviderDraftToken('');
-  }, [configuredProviders, currentPage, newProviderType, providerDetail.data, selectedProviderDetailId]);
+    setProviderDraftSourceKey(nextSourceKey);
+  }, [currentPage, newProviderType, providerDetail.data, providerDraft, providerDraftSourceKey, selectedProviderDetailId]);
 
   function openCreateMappingModal() {
     if (!activeProjectId) {
@@ -1765,7 +2029,8 @@ function SyncCenterSurface(props: {
       mode: 'create',
       draft: {
         ...createEmptyMappingRow(selectedProvider?.id ?? '', defaultAssignee),
-        jiraProjectKey: getSuggestedUpstreamProjectKey(selectedProvider?.type, projectPage.data)
+        jiraProjectKey: defaultProjectKey
+          || getSuggestedUpstreamProjectKey(selectedProvider?.type, projectPage.data)
           || getSuggestedUpstreamProjectKey(selectedProvider?.type, activeProject),
         paperclipProjectId: activeProjectId,
         paperclipProjectName: activeProject?.projectName ?? projectPage.data?.projectName ?? ''
@@ -1795,6 +2060,7 @@ function SyncCenterSurface(props: {
 
     const nextRow: MappingRow = {
       ...mappingModal.draft,
+      enabled: mappingModal.draft.enabled !== false,
       jiraProjectKey: normalizeUpstreamProjectKey(mappingModal.draft.jiraProjectKey, selectedProvider?.type),
       jiraJql: mappingModal.draft.jiraJql,
       paperclipProjectId: activeProjectId,
@@ -1821,7 +2087,13 @@ function SyncCenterSurface(props: {
     ]);
   }
 
-  async function persistProjectSettings(nextProviderId?: string | null): Promise<boolean> {
+  async function persistProjectSettings(
+    nextProviderId?: string | null,
+    options?: {
+      allowEmptyDefaultProjectKey?: boolean;
+      resetProviderSpecificSettings?: boolean;
+    }
+  ): Promise<boolean> {
     if (!activeProjectId || !activeProject?.projectName) {
       setLocalResult({
         message: 'Choose a Paperclip project before saving sync settings.',
@@ -1829,13 +2101,32 @@ function SyncCenterSurface(props: {
       });
       return false;
     }
+    const effectiveProviderId = nextProviderId !== undefined ? nextProviderId : (selectedProvider?.id ?? null);
+    const effectiveProvider = configuredProviders.find((provider) => provider.id === effectiveProviderId) ?? selectedProvider;
+    if (effectiveProviderId && !defaultProjectKey.trim() && !options?.allowEmptyDefaultProjectKey) {
+      setLocalResult({
+        message: `${getProviderProjectLabel(effectiveProvider?.type)} is required before saving project sync settings.`,
+        tone: 'error'
+      });
+      setActiveProjectTab('essential');
+      return false;
+    }
 
     const persistedMappings = projectPage.data?.mappings ?? [];
     const persistedSelectedProviderId = projectPage.data?.selectedProviderId ?? '';
-    const effectiveRows = !rowsDirty && rows.length === 0 && persistedMappings.length > 0
-      ? persistedMappings.map((mapping) => ({
+    const shouldResetProviderSpecificSettings = Boolean(options?.resetProviderSpecificSettings);
+    const effectiveDefaultAssignee = shouldResetProviderSpecificSettings ? null : defaultAssignee;
+    const effectiveDefaultStatusAssigneeAgentId = shouldResetProviderSpecificSettings ? '' : defaultStatusAssigneeAgentId;
+    const effectiveStatusMappings = shouldResetProviderSpecificSettings
+      ? getDefaultStatusMappingRowsForProviderType(effectiveProvider?.type)
+      : statusMappings;
+    const effectiveRowsFromState = shouldResetProviderSpecificSettings ? [] : rows;
+    const persistedAdditionalRows = persistedMappings.slice(1);
+    const effectiveAdditionalRows = !rowsDirty && effectiveRowsFromState.length === 0 && persistedAdditionalRows.length > 0
+      ? persistedAdditionalRows.map((mapping) => ({
           id: mapping.id,
           providerId: mapping.providerId ?? persistedSelectedProviderId,
+          enabled: mapping.enabled !== false,
           jiraProjectKey: mapping.jiraProjectKey,
           jiraJql: mapping.jiraJql ?? '',
           paperclipProjectId: mapping.paperclipProjectId ?? activeProjectId,
@@ -1848,22 +2139,42 @@ function SyncCenterSurface(props: {
             issueNumberLessThan: mapping.filters?.issueNumberLessThan
           }
         }))
-      : rows;
+      : effectiveRowsFromState;
+    const defaultMappingId = persistedMappings[0]?.id ?? 'mapping-1';
+    const defaultMapping: MappingRow | null = effectiveProviderId && defaultProjectKey.trim()
+      ? {
+          id: defaultMappingId,
+          providerId: effectiveProviderId,
+          enabled: defaultMappingEnabled,
+          jiraProjectKey: normalizeUpstreamProjectKey(defaultProjectKey, effectiveProvider?.type),
+          jiraJql: '',
+          paperclipProjectId: activeProjectId,
+          paperclipProjectName: activeProject.projectName,
+          filters: {
+            onlyActive: true,
+            ...(effectiveDefaultAssignee ? { assignee: effectiveDefaultAssignee } : {})
+          }
+        }
+      : null;
+    const effectiveRows = [
+      ...(defaultMapping ? [defaultMapping] : []),
+      ...effectiveAdditionalRows
+    ];
 
     try {
       await saveProject.run({
         companyId,
         projectId: activeProjectId,
         projectName: activeProject.projectName,
-        providerId: nextProviderId !== undefined ? nextProviderId : (selectedProvider?.id ?? null),
+        providerId: effectiveProviderId,
         agentIssueProviderAccess: {
           enabled: agentIssueProviderAccessEnabled,
           allowedAgentIds
         },
-        defaultAssignee,
+        defaultAssignee: effectiveDefaultAssignee,
         defaultStatus,
-        defaultStatusAssigneeAgentId: defaultStatusAssigneeAgentId || null,
-        statusMappings: statusMappings
+        defaultStatusAssigneeAgentId: effectiveDefaultStatusAssigneeAgentId || null,
+        statusMappings: effectiveStatusMappings
           .filter((row) => row.jiraStatus.trim())
           .map((row) => ({
             jiraStatus: row.jiraStatus.trim(),
@@ -1875,8 +2186,9 @@ function SyncCenterSurface(props: {
           .filter((row) => row.jiraProjectKey.trim())
           .map((row) => ({
             id: row.id,
-            providerId: selectedProvider?.id ?? row.providerId.trim(),
-            jiraProjectKey: normalizeUpstreamProjectKey(row.jiraProjectKey, selectedProvider?.type),
+            providerId: effectiveProvider?.id ?? row.providerId.trim(),
+            enabled: row.enabled !== false,
+            jiraProjectKey: normalizeUpstreamProjectKey(row.jiraProjectKey, effectiveProvider?.type),
             jiraJql: row.jiraJql.trim() || undefined,
             paperclipProjectId: activeProjectId,
             paperclipProjectName: activeProject.projectName,
@@ -1906,12 +2218,35 @@ function SyncCenterSurface(props: {
   }
 
   async function handleProviderSelection(nextProviderId: string) {
+    const previousProvider = configuredProviders.find((provider) => provider.id === selectedProviderId) ?? null;
+    const nextProvider = configuredProviders.find((provider) => provider.id === nextProviderId) ?? null;
+    const providerTypeChanged = Boolean(
+      previousProvider
+      && nextProvider
+      && previousProvider.type !== nextProvider.type
+    );
+    const nextDefaultProjectKey = defaultProjectKey.trim()
+      || getSuggestedUpstreamProjectKey(nextProvider?.type, projectPage.data)
+      || getSuggestedUpstreamProjectKey(nextProvider?.type, activeProject);
     setSelectedProviderId(nextProviderId);
+    if (providerTypeChanged) {
+      setDefaultAssignee(null);
+      setDefaultStatus('todo');
+      setDefaultStatusAssigneeAgentId('');
+      setStatusMappings(getDefaultStatusMappingRowsForProviderType(nextProvider?.type));
+      setRows([]);
+      setRowsDirty(true);
+    }
+    if (!defaultProjectKey.trim() && nextDefaultProjectKey) {
+      setDefaultProjectKey(nextDefaultProjectKey);
+    }
     if (!activeProjectId || !activeProject) {
       return;
     }
-
-    await persistProjectSettings(nextProviderId || null);
+    await persistProjectSettings(nextProviderId || null, {
+      allowEmptyDefaultProjectKey: true,
+      resetProviderSpecificSettings: providerTypeChanged
+    });
   }
 
   async function handleDisableSync() {
@@ -2135,26 +2470,26 @@ function SyncCenterSurface(props: {
       return;
     }
 
-    const hiddenAt = new Date().toISOString();
-    for (const issueId of cleanupModal.selectedIssueIds) {
-      await hostFetchJson(`/api/issues/${issueId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          hiddenAt
-        })
-      });
-    }
+    const selectedIssueIds = cleanupModal.selectedIssueIds;
+    const nativeHideFailures = await hideIssuesInPaperclip(selectedIssueIds);
 
-    const message = `Hid ${cleanupModal.selectedIssueIds.length} imported issue${cleanupModal.selectedIssueIds.length === 1 ? '' : 's'} in Paperclip.`;
+    await cleanupImportedIssues.run({
+      companyId,
+      issueIds: selectedIssueIds
+    });
+
+    const message = nativeHideFailures.length === 0
+      ? `Hid ${selectedIssueIds.length} imported issue${selectedIssueIds.length === 1 ? '' : 's'} in Paperclip.`
+      : `Hidden ${selectedIssueIds.length} imported issue${selectedIssueIds.length === 1 ? '' : 's'} from sync. ${nativeHideFailures.length} could not be hidden in Paperclip UI.`;
     setCleanupModal(null);
     setLocalResult({
       message,
-      tone: 'success'
+      tone: nativeHideFailures.length === 0 ? 'success' : 'error'
     });
     toast({
-      title: 'Issue Sync',
+      title: 'External Issue Sync',
       body: message,
-      tone: 'success'
+      tone: nativeHideFailures.length === 0 ? 'success' : 'error'
     });
     await refreshSyncData();
   }
@@ -2173,6 +2508,7 @@ function SyncCenterSurface(props: {
   function openCreateProviderPage() {
     setProviderDraft(createEmptyProviderDraft(newProviderType));
     setProviderDraftToken('');
+    setProviderDraftSourceKey(`new:${newProviderType}`);
     setSelectedProviderDetailId(null);
     setCurrentPage('provider-detail');
   }
@@ -2181,13 +2517,14 @@ function SyncCenterSurface(props: {
     if (providerId) {
       setProviderDraft(null);
     }
+    setProviderDraftSourceKey(null);
     setSelectedProviderDetailId(providerId ?? null);
     setCurrentPage('provider-detail');
   }
 
   const headerTitle =
     currentPage === 'projects'
-      ? (props.embeddedTitle ?? 'Issue Sync')
+      ? (props.embeddedTitle ?? 'External Issue Sync')
         : currentPage === 'project'
           ? (projectPage.data?.projectName ?? activeProject?.projectName ?? 'Project Sync')
         : currentPage === 'providers'
@@ -2203,15 +2540,41 @@ function SyncCenterSurface(props: {
         : currentPage === 'providers'
           ? 'Manage reusable upstream providers separately from individual project sync settings.'
           : 'Use the same modal shell with Back navigation instead of stacking nested popups.';
+  const projectBottomMessage =
+    currentPage === 'project'
+      ? (
+        localResult?.message
+        || saveProject.message
+        || runSync.message
+        || cleanupCandidates.message
+        || (projectPage.data?.syncProgress?.status === 'error' ? projectPage.data?.syncProgress?.message : null)
+      )
+      : null;
+  const projectBottomMessageTone =
+    currentPage === 'project'
+      ? (
+        localResult?.tone === 'error'
+        || saveProject.tone === 'error'
+        || runSync.tone === 'error'
+        || cleanupCandidates.tone === 'error'
+        || projectPage.data?.syncProgress?.status === 'error'
+          ? 'error'
+          : localResult?.tone === 'success'
+            || saveProject.tone === 'success'
+            || runSync.tone === 'success'
+            || cleanupCandidates.tone === 'success'
+            ? 'success'
+            : 'default'
+      )
+      : 'default';
   const message =
     configError
-    || localResult?.message
-    || saveProject.message
-    || testConnection.message
     || refreshIdentity.message
-    || runSync.message
-    || cleanupCandidates.message
-    || projectPage.data?.connectionTest?.message;
+    || (testConnection.tone === 'error' ? testConnection.message : null)
+    || (projectPage.data?.connectionTest?.status === 'error' ? projectPage.data?.connectionTest?.message : null)
+    || (currentPage !== 'project'
+      ? (localResult?.message || saveProject.message || runSync.message || cleanupCandidates.message)
+      : null);
   const messageTone =
     configError
     || localResult?.tone === 'error'
@@ -2409,238 +2772,290 @@ function SyncCenterSurface(props: {
                       {buttonLabel('hide', cleanupCandidates.busy ? 'Preparing…' : 'Hide imported issues')}
                     </button>
                   </div>
+                  <ResultMessage message={projectBottomMessage} tone={projectBottomMessageTone} />
                 </div>
               </div>
             ) : null}
 
             {providerEnabled ? (
               <>
-                <div style={{ ...sectionCardStyle(), position: 'relative', zIndex: 4 }}>
-                  <div style={stackStyle(12)}>
-                    <div style={rowStyle()}>
-                      <strong>Project defaults</strong>
-                      <span style={neutralBadgeStyle()}>{providerLabel(selectedProvider?.type, getProviderTypeLabel(selectedProvider?.type))}</span>
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
-                      <JiraUserAutocomplete
-                        companyId={companyId}
-                        providerId={selectedProvider?.id ?? null}
-                        label="Default assignee"
-                        value={defaultAssignee}
-                        disabled={!activeProjectId}
-                        placeholder={getProviderUsersPlaceholder(selectedProvider?.type)}
-                        trailingAction={(
-                          <button
-                            type="button"
-                            style={buttonStyle()}
-                            disabled={!activeProjectId || !selectedProvider?.id || refreshIdentity.busy}
-                            onMouseDown={(event) => event.preventDefault()}
-                            onClick={() => {
-                              if (!activeProjectId || !selectedProvider?.id) {
-                                return;
-                              }
-                              void refreshIdentity.run({
-                                companyId,
-                                projectId: activeProjectId,
-                                providerId: selectedProvider.id
-                              }).then((result) => {
-                                const nextAssignee = (result as { defaultAssignee?: JiraUserReference | null }).defaultAssignee ?? null;
-                                setDefaultAssignee(nextAssignee);
-                                void refreshSyncData();
-                              });
-                            }}
-                          >
-                            {buttonLabel('user', refreshIdentity.busy ? 'Loading…' : 'Current user')}
-                          </button>
-                        )}
-                        onChange={setDefaultAssignee}
-                      />
-                    </div>
-                    <label style={stackStyle(6)}>
-                      <span style={{ fontSize: 13, fontWeight: 600 }}>Scheduled sync cadence (minutes)</span>
-                      <input
-                        style={inputStyle()}
-                        type="number"
-                        min={1}
-                        max={1440}
-                        value={scheduleFrequencyMinutes}
-                        disabled={!activeProjectId}
-                        onChange={(event) => setScheduleFrequencyMinutes(Number(event.target.value) || 15)}
-                      />
-                    </label>
-                  </div>
-                </div>
-
-                <div style={sectionCardStyle()}>
-                  <div style={stackStyle(12)}>
-                    <div style={stackStyle(4)}>
-                      <strong>Agent access</strong>
-                      <div style={{ fontSize: 12, opacity: 0.74 }}>
-                        Let selected Paperclip agents use issue-provider tools for this project only. Access stays scoped to this project and its current provider.
-                      </div>
-                    </div>
-                    <label style={{ ...rowStyle(), alignItems: 'flex-start' }}>
-                      <input
-                        type="checkbox"
-                        checked={agentIssueProviderAccessEnabled}
-                        onChange={(event) => {
-                          const enabled = event.target.checked;
-                          setAgentIssueProviderAccessEnabled(enabled);
-                          if (!enabled) {
-                            setAllowedAgentIds([]);
-                          }
-                        }}
-                      />
-                      <span style={{ fontSize: 13, fontWeight: 500 }}>
-                        Allow agents to use issue provider tools for this project
-                      </span>
-                    </label>
-                    <div
-                      style={{
-                        ...panelStyle(),
-                        opacity: agentIssueProviderAccessEnabled ? 1 : 0.68
-                      }}
+                <div style={tabListStyle()}>
+                  {[
+                    { id: 'essential', label: 'Essential' },
+                    { id: 'agent-access', label: 'Agent access' },
+                    { id: 'mappings', label: 'Project mappings' },
+                    { id: 'status-mapping', label: 'Status mapping' }
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      style={tabButtonStyle(activeProjectTab === tab.id)}
+                      onClick={() => setActiveProjectTab(tab.id as ProjectSettingsTabId)}
                     >
-                      <div style={stackStyle(8)}>
-                        <div style={{ fontSize: 12, opacity: 0.74 }}>Allowed agents</div>
-                        {assignableAgents.length > 0 ? (
-                          <div style={{ display: 'grid', gap: 8 }}>
-                            {assignableAgents.map((agent) => {
-                              const checked = allowedAgentIds.includes(agent.id);
-                              return (
-                                <label
-                                  key={agent.id}
-                                  style={{ ...rowStyle(), alignItems: 'center', cursor: agentIssueProviderAccessEnabled ? 'pointer' : 'default' }}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    disabled={!agentIssueProviderAccessEnabled}
-                                    checked={checked}
-                                    onChange={(event) => {
-                                      const nextChecked = event.target.checked;
-                                      setAllowedAgentIds((current) => (
-                                        nextChecked
-                                          ? [...current, agent.id].filter((value, index, values) => values.indexOf(value) === index)
-                                          : current.filter((value) => value !== agent.id)
-                                      ));
-                                    }}
-                                  />
-                                  <span style={{ fontSize: 13 }}>{formatAgentOptionLabel(agent)}</span>
-                                </label>
-                              );
-                            })}
-                          </div>
-                        ) : (
-                          <div style={{ fontSize: 12, opacity: 0.74 }}>
-                            {assignableAgentsData.loading ? 'Loading Paperclip agents…' : 'No active Paperclip agents are available yet.'}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    {assignableAgentsError ? (
-                      <div style={{ fontSize: 12, color: 'var(--danger-text, #dc2626)' }}>
-                        Could not load Paperclip agents right now. {assignableAgentsError}
-                      </div>
-                    ) : null}
-                  </div>
+                      {tab.label}
+                    </button>
+                  ))}
                 </div>
 
-                <div style={sectionCardStyle()}>
-                  <div style={stackStyle(12)}>
-                    <strong>Project mappings</strong>
-                    <MappingEditor
-                      rows={rows}
-                      providerType={selectedProvider?.type ?? null}
-                      onCreate={openCreateMappingModal}
-                      onEdit={openEditMappingModal}
-                      onRemove={(rowId) => {
-                        setRows((current) => current.filter((row) => row.id !== rowId));
-                        setRowsDirty(true);
+                {activeProjectTab === 'essential' ? (
+                  <div style={{ ...sectionCardStyle(), position: 'relative', zIndex: 4 }}>
+                    <div style={stackStyle(14)}>
+                      <div style={rowStyle()}>
+                        <strong>Essential configuration</strong>
+                        <span style={neutralBadgeStyle()}>{providerLabel(selectedProvider?.type, getProviderTypeLabel(selectedProvider?.type))}</span>
+                      </div>
+                      <div style={{
+                        border: '1px solid var(--border)',
+                        borderRadius: 12,
+                        overflow: 'hidden'
                       }}
-                    />
-                  </div>
-                </div>
-
-                <div style={sectionCardStyle()}>
-                  <div style={stackStyle(12)}>
-                    <div style={stackStyle(4)}>
-                      <strong>Upstream to Paperclip status mapping</strong>
-                      <div style={{ fontSize: 12, opacity: 0.74 }}>
-                        {getProviderPlatformName(selectedProvider?.type)} issue status changes can update the local Paperclip status and optionally assign a Paperclip agent.
-                      </div>
-                    </div>
-                    <div style={{
-                      border: '1px solid var(--border)',
-                      borderRadius: 10,
-                      overflow: 'hidden'
-                    }}
-                    >
-                      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                        <thead>
-                          <tr style={{ background: 'color-mix(in srgb, var(--muted, #888) 10%, transparent)' }}>
-                            <th style={statusMappingHeaderCellStyle()}>{getProviderStatusLabel(selectedProvider?.type)}</th>
-                            <th style={statusMappingHeaderCellStyle()}>Paperclip Status</th>
-                            <th style={statusMappingHeaderCellStyle()}>Assign Agent</th>
-                            <th style={statusMappingHeaderCellStyle()}>Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          <tr>
-                            <td style={statusMappingCellStyle()}>
-                              <span style={{ fontSize: 13, fontWeight: 600 }}>Default</span>
-                            </td>
-                            <td style={statusMappingCellStyle()}>
-                              <select
-                                style={inputStyle()}
-                                value={defaultStatus}
-                                disabled={!activeProjectId}
-                                onChange={(event) => setDefaultStatus(event.target.value)}
-                              >
-                                {PAPERCLIP_STATUS_OPTIONS.map((status) => (
-                                  <option key={status} value={status}>{formatIssueStatus(status)}</option>
-                                ))}
-                              </select>
-                            </td>
-                            <td style={statusMappingCellStyle()}>
-                              <select
-                                style={inputStyle()}
-                                value={defaultStatusAssigneeAgentId}
-                                disabled={!activeProjectId}
-                                onChange={(event) => setDefaultStatusAssigneeAgentId(event.target.value)}
-                              >
-                                <option value="">None</option>
-                                {assignableAgents.map((agent) => (
-                                  <option key={agent.id} value={agent.id}>{formatAgentOptionLabel(agent)}</option>
-                                ))}
-                              </select>
-                            </td>
-                            <td style={statusMappingCellStyle()}>
-                              <span style={{ fontSize: 12, opacity: 0.72 }}>Fallback</span>
-                            </td>
-                          </tr>
-                          {statusMappings.map((mapping) => (
-                            <tr key={mapping.id}>
+                      >
+                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                          <tbody>
+                            <tr>
+                              <td style={{ ...statusMappingHeaderCellStyle(), width: '34%' }}>
+                                {getProviderProjectLabel(selectedProvider?.type)}
+                              </td>
+                              <td style={statusMappingCellStyle()}>
+                                <UpstreamProjectAutocomplete
+                                  companyId={companyId}
+                                  providerId={selectedProvider?.id ?? null}
+                                  providerType={selectedProvider?.type ?? null}
+                                  label={getProviderProjectLabel(selectedProvider?.type)}
+                                  hideLabel
+                                  value={defaultProjectKey}
+                                  placeholder={getProviderProjectPlaceholder(selectedProvider?.type)}
+                                  onChange={setDefaultProjectKey}
+                                />
+                                {isGitHubProviderType(selectedProvider?.type) ? (
+                                  <div style={{ ...mappingTableMutedTextStyle(), marginTop: 6 }}>
+                                    {getSuggestedUpstreamProjectKey(selectedProvider?.type, projectPage.data) || getSuggestedUpstreamProjectKey(selectedProvider?.type, activeProject)
+                                      ? `Prefilled from this Paperclip project's bound GitHub repository: ${getSuggestedUpstreamProjectKey(selectedProvider?.type, projectPage.data) || getSuggestedUpstreamProjectKey(selectedProvider?.type, activeProject)}. You can still override it here.`
+                                      : 'Use `owner/repo`.'}
+                                  </div>
+                                ) : null}
+                              </td>
+                            </tr>
+                            <tr>
+                              <td style={{ ...statusMappingHeaderCellStyle(), width: '34%' }}>
+                                Default assignee
+                              </td>
+                              <td style={statusMappingCellStyle()}>
+                                <JiraUserAutocomplete
+                                  companyId={companyId}
+                                  providerId={selectedProvider?.id ?? null}
+                                  label="Default assignee"
+                                  hideLabel
+                                  value={defaultAssignee}
+                                  disabled={!activeProjectId}
+                                  placeholder={getProviderUsersPlaceholder(selectedProvider?.type)}
+                                  trailingAction={(
+                                    <button
+                                      type="button"
+                                      style={buttonStyle()}
+                                      disabled={!activeProjectId || !selectedProvider?.id || refreshIdentity.busy}
+                                      onMouseDown={(event) => event.preventDefault()}
+                                      onClick={() => {
+                                        if (!activeProjectId || !selectedProvider?.id) {
+                                          return;
+                                        }
+                                        void refreshIdentity.run({
+                                          companyId,
+                                          projectId: activeProjectId,
+                                          providerId: selectedProvider.id
+                                        }).then((result) => {
+                                          const nextAssignee = (result as { defaultAssignee?: JiraUserReference | null }).defaultAssignee ?? null;
+                                          setDefaultAssignee(nextAssignee);
+                                          void refreshSyncData();
+                                        });
+                                      }}
+                                    >
+                                      {buttonLabel('user', refreshIdentity.busy ? 'Loading…' : 'Current user')}
+                                    </button>
+                                  )}
+                                  onChange={setDefaultAssignee}
+                                />
+                              </td>
+                            </tr>
+                            <tr>
+                              <td style={{ ...statusMappingHeaderCellStyle(), width: '34%' }}>
+                                Scheduled sync cadence (minutes)
+                              </td>
                               <td style={statusMappingCellStyle()}>
                                 <input
                                   style={inputStyle()}
-                                  value={mapping.jiraStatus}
-                                  placeholder={getProviderStatusLabel(selectedProvider?.type)}
-                                  onChange={(event) => setStatusMappings((current) => current.map((entry) => (
-                                    entry.id === mapping.id
-                                      ? { ...entry, jiraStatus: event.target.value }
-                                      : entry
-                                  )))}
+                                  type="number"
+                                  min={1}
+                                  max={1440}
+                                  value={scheduleFrequencyMinutes}
+                                  disabled={!activeProjectId}
+                                  onChange={(event) => setScheduleFrequencyMinutes(Number(event.target.value) || 15)}
                                 />
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                {activeProjectTab === 'agent-access' ? (
+                  <div style={sectionCardStyle()}>
+                    <div style={stackStyle(12)}>
+                      <div style={stackStyle(4)}>
+                        <strong>Agent access</strong>
+                        <div style={{ fontSize: 12, opacity: 0.74 }}>
+                          Let selected Paperclip agents use issue-provider tools for this project only. Access stays scoped to this project and its current provider.
+                        </div>
+                      </div>
+                      <label style={{ ...rowStyle(), alignItems: 'flex-start' }}>
+                        <input
+                          type="checkbox"
+                          checked={agentIssueProviderAccessEnabled}
+                          onChange={(event) => {
+                            const enabled = event.target.checked;
+                            setAgentIssueProviderAccessEnabled(enabled);
+                            if (!enabled) {
+                              setAllowedAgentIds([]);
+                            }
+                          }}
+                        />
+                        <span style={{ fontSize: 13, fontWeight: 500 }}>
+                          Allow agents to use issue provider tools for this project
+                        </span>
+                      </label>
+                      <div
+                        style={{
+                          ...panelStyle(),
+                          opacity: agentIssueProviderAccessEnabled ? 1 : 0.68
+                        }}
+                      >
+                        <div style={stackStyle(8)}>
+                          <div style={{ fontSize: 12, opacity: 0.74 }}>Allowed agents</div>
+                          {assignableAgents.length > 0 ? (
+                            <div style={{ display: 'grid', gap: 8 }}>
+                              {assignableAgents.map((agent) => {
+                                const checked = allowedAgentIds.includes(agent.id);
+                                return (
+                                  <label
+                                    key={agent.id}
+                                    style={{ ...rowStyle(), alignItems: 'center', cursor: agentIssueProviderAccessEnabled ? 'pointer' : 'default' }}
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      disabled={!agentIssueProviderAccessEnabled}
+                                      checked={checked}
+                                      onChange={(event) => {
+                                        const nextChecked = event.target.checked;
+                                        setAllowedAgentIds((current) => (
+                                          nextChecked
+                                            ? [...current, agent.id].filter((value, index, values) => values.indexOf(value) === index)
+                                            : current.filter((value) => value !== agent.id)
+                                        ));
+                                      }}
+                                    />
+                                    <span style={{ fontSize: 13 }}>{formatAgentOptionLabel(agent)}</span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 12, opacity: 0.74 }}>
+                              {assignableAgentsData.loading ? 'Loading Paperclip agents…' : 'No active Paperclip agents are available yet.'}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      {assignableAgentsError ? (
+                        <div style={{ fontSize: 12, color: 'var(--danger-text, #dc2626)' }}>
+                          Could not load Paperclip agents right now. {assignableAgentsError}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+
+                {activeProjectTab === 'mappings' ? (
+                  <div style={sectionCardStyle()}>
+                    <div style={stackStyle(12)}>
+                      <div style={stackStyle(4)}>
+                        <strong>Project mappings</strong>
+                        <div style={{ fontSize: 12, opacity: 0.74 }}>
+                          The default mapping is managed from the Essential tab. Add extra rows here only for additional filters or upstream feeds.
+                        </div>
+                      </div>
+                      <MappingEditor
+                        defaultRow={{
+                          id: 'mapping-default',
+                          providerId: selectedProvider?.id ?? '',
+                          enabled: defaultMappingEnabled,
+                          jiraProjectKey: defaultProjectKey,
+                          jiraJql: '',
+                          paperclipProjectId: activeProjectId,
+                          paperclipProjectName: activeProject?.projectName ?? projectPage.data?.projectName ?? '',
+                          filters: {
+                            onlyActive: true,
+                            ...(defaultAssignee ? { assignee: defaultAssignee } : {})
+                          }
+                        }}
+                        rows={rows}
+                        providerType={selectedProvider?.type ?? null}
+                        onCreate={openCreateMappingModal}
+                        onEdit={openEditMappingModal}
+                        onRemove={(rowId) => {
+                          setRows((current) => current.filter((row) => row.id !== rowId));
+                          setRowsDirty(true);
+                        }}
+                        onToggleEnabled={(rowId, enabled) => {
+                          setRows((current) => current.map((row) => (
+                            row.id === rowId
+                              ? { ...row, enabled }
+                              : row
+                          )));
+                          setRowsDirty(true);
+                        }}
+                        onToggleDefaultEnabled={setDefaultMappingEnabled}
+                      />
+                    </div>
+                  </div>
+                ) : null}
+
+                {activeProjectTab === 'status-mapping' ? (
+                  <div style={sectionCardStyle()}>
+                    <div style={stackStyle(12)}>
+                      <div style={stackStyle(4)}>
+                        <strong>Upstream to Paperclip status mapping</strong>
+                        <div style={{ fontSize: 12, opacity: 0.74 }}>
+                          {getProviderPlatformName(selectedProvider?.type)} issue status changes can update the local Paperclip status and optionally assign a Paperclip agent.
+                        </div>
+                      </div>
+                      <div style={{
+                        border: '1px solid var(--border)',
+                        borderRadius: 10,
+                        overflow: 'hidden'
+                      }}
+                      >
+                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr style={{ background: 'color-mix(in srgb, var(--muted, #888) 10%, transparent)' }}>
+                              <th style={statusMappingHeaderCellStyle()}>{getProviderStatusLabel(selectedProvider?.type)}</th>
+                              <th style={statusMappingHeaderCellStyle()}>Paperclip Status</th>
+                              <th style={statusMappingHeaderCellStyle()}>Assign Agent</th>
+                              <th style={statusMappingHeaderCellStyle()}>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td style={statusMappingCellStyle()}>
+                                <span style={{ fontSize: 13, fontWeight: 600 }}>Default</span>
                               </td>
                               <td style={statusMappingCellStyle()}>
                                 <select
                                   style={inputStyle()}
-                                  value={mapping.paperclipStatus}
-                                  onChange={(event) => setStatusMappings((current) => current.map((entry) => (
-                                    entry.id === mapping.id
-                                      ? { ...entry, paperclipStatus: event.target.value }
-                                      : entry
-                                  )))}
+                                  value={defaultStatus}
+                                  disabled={!activeProjectId}
+                                  onChange={(event) => setDefaultStatus(event.target.value)}
                                 >
                                   {PAPERCLIP_STATUS_OPTIONS.map((status) => (
                                     <option key={status} value={status}>{formatIssueStatus(status)}</option>
@@ -2650,12 +3065,9 @@ function SyncCenterSurface(props: {
                               <td style={statusMappingCellStyle()}>
                                 <select
                                   style={inputStyle()}
-                                  value={mapping.assigneeAgentId ?? ''}
-                                  onChange={(event) => setStatusMappings((current) => current.map((entry) => (
-                                    entry.id === mapping.id
-                                      ? { ...entry, assigneeAgentId: event.target.value }
-                                      : entry
-                                  )))}
+                                  value={defaultStatusAssigneeAgentId}
+                                  disabled={!activeProjectId}
+                                  onChange={(event) => setDefaultStatusAssigneeAgentId(event.target.value)}
                                 >
                                   <option value="">None</option>
                                   {assignableAgents.map((agent) => (
@@ -2664,40 +3076,90 @@ function SyncCenterSurface(props: {
                                 </select>
                               </td>
                               <td style={statusMappingCellStyle()}>
-                                <button
-                                  type="button"
-                                  style={buttonStyle()}
-                                  onClick={() => setStatusMappings((current) => current.filter((entry) => entry.id !== mapping.id))}
-                                >
-                                  {buttonLabel('close', 'Remove')}
-                                </button>
+                                <span style={{ fontSize: 12, opacity: 0.72 }}>Fallback</span>
                               </td>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    {assignableAgentsError ? (
-                      <div style={{ fontSize: 12, color: 'var(--danger-text, #dc2626)' }}>
-                        Could not load Paperclip agents right now. {assignableAgentsError}
+                            {statusMappings.map((mapping) => (
+                              <tr key={mapping.id}>
+                                <td style={statusMappingCellStyle()}>
+                                  <input
+                                    style={inputStyle()}
+                                    value={mapping.jiraStatus}
+                                    placeholder={getProviderStatusLabel(selectedProvider?.type)}
+                                    onChange={(event) => setStatusMappings((current) => current.map((entry) => (
+                                      entry.id === mapping.id
+                                        ? { ...entry, jiraStatus: event.target.value }
+                                        : entry
+                                    )))}
+                                  />
+                                </td>
+                                <td style={statusMappingCellStyle()}>
+                                  <select
+                                    style={inputStyle()}
+                                    value={mapping.paperclipStatus}
+                                    onChange={(event) => setStatusMappings((current) => current.map((entry) => (
+                                      entry.id === mapping.id
+                                        ? { ...entry, paperclipStatus: event.target.value }
+                                        : entry
+                                    )))}
+                                  >
+                                    {PAPERCLIP_STATUS_OPTIONS.map((status) => (
+                                      <option key={status} value={status}>{formatIssueStatus(status)}</option>
+                                    ))}
+                                  </select>
+                                </td>
+                                <td style={statusMappingCellStyle()}>
+                                  <select
+                                    style={inputStyle()}
+                                    value={mapping.assigneeAgentId ?? ''}
+                                    onChange={(event) => setStatusMappings((current) => current.map((entry) => (
+                                      entry.id === mapping.id
+                                        ? { ...entry, assigneeAgentId: event.target.value }
+                                        : entry
+                                    )))}
+                                  >
+                                    <option value="">None</option>
+                                    {assignableAgents.map((agent) => (
+                                      <option key={agent.id} value={agent.id}>{formatAgentOptionLabel(agent)}</option>
+                                    ))}
+                                  </select>
+                                </td>
+                                <td style={statusMappingCellStyle()}>
+                                  <button
+                                    type="button"
+                                    style={buttonStyle()}
+                                    onClick={() => setStatusMappings((current) => current.filter((entry) => entry.id !== mapping.id))}
+                                  >
+                                    {buttonLabel('close', 'Remove')}
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
-                    ) : null}
-                    <div style={rowStyle()}>
-                      <button
-                        type="button"
-                        style={buttonStyle()}
-                        onClick={() => setStatusMappings((current) => [...current, {
-                          id: `status-mapping-${Date.now()}`,
-                          jiraStatus: '',
-                          paperclipStatus: defaultStatus,
-                          assigneeAgentId: ''
-                        }])}
-                      >
-                        {buttonLabel('add', 'Add status mapping')}
-                      </button>
+                      {assignableAgentsError ? (
+                        <div style={{ fontSize: 12, color: 'var(--danger-text, #dc2626)' }}>
+                          Could not load Paperclip agents right now. {assignableAgentsError}
+                        </div>
+                      ) : null}
+                      <div style={rowStyle()}>
+                        <button
+                          type="button"
+                          style={buttonStyle()}
+                          onClick={() => setStatusMappings((current) => [...current, {
+                            id: `status-mapping-${Date.now()}`,
+                            jiraStatus: '',
+                            paperclipStatus: defaultStatus,
+                            assigneeAgentId: ''
+                          }])}
+                        >
+                          {buttonLabel('add', 'Add status mapping')}
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
+                ) : null}
 
                 <div style={{ ...sectionCardStyle(), display: 'grid', gap: 10 }}>
                   <div style={{ fontSize: 12, opacity: 0.72 }}>
@@ -2776,7 +3238,6 @@ function SyncCenterSurface(props: {
                 <div style={rowStyle()}>
                   <strong>{provider.displayName}</strong>
                   <span style={neutralBadgeStyle()}>{providerLabel(provider.providerType, getProviderTypeLabel(provider.providerType))}</span>
-                  {provider.tokenSaved ? <span style={neutralBadgeStyle()}>Token saved</span> : null}
                   <span style={healthBadgeStyle(provider.status)}>
                     {formatProviderHealthLabel(provider.status, provider.healthLabel)}
                   </span>
@@ -2784,7 +3245,7 @@ function SyncCenterSurface(props: {
                 <div style={{ fontSize: 13, opacity: 0.8 }}>
                   {shouldShowProviderHealthMessage(provider.status) && provider.healthMessage
                     ? provider.healthMessage
-                    : 'Open to review connection details.'}
+                    : provider.configSummary || 'Open to review connection details.'}
                 </div>
               </button>
             ))}
@@ -2797,7 +3258,6 @@ function SyncCenterSurface(props: {
               <div style={rowStyle()}>
                 <strong>{providerDetail.data?.mode === 'edit' ? 'Edit provider' : 'Create provider'}</strong>
                 <span style={neutralBadgeStyle()}>{providerLabel(providerDraft.type, getProviderTypeLabel(providerDraft.type))}</span>
-                {providerDetail.data?.tokenSaved ? <span style={neutralBadgeStyle()}>Token saved</span> : null}
                 <span style={healthBadgeStyle(providerDetail.data?.healthStatus)}>
                   {formatProviderHealthLabel(providerDetail.data?.healthStatus)}
                 </span>
@@ -2935,12 +3395,17 @@ function SyncCenterSurface(props: {
                   value={providerDraftToken}
                   placeholder={
                     providerDetail.data?.tokenSaved
-                      ? 'Saved token is hidden. Enter a new token only to replace it.'
+                      ? '********'
                       : (isJiraProviderType(providerDraft.type) ? 'Paste Jira API token' : 'Paste GitHub Personal Access Token')
                   }
                   onChange={(event) => setProviderDraftToken(event.target.value)}
                 />
               </label>
+              {providerDetail.data?.tokenSaved ? (
+                <div style={{ fontSize: 12, opacity: 0.75 }}>
+                  Leave the token field unchanged to keep the current token. Enter a new value only to replace it.
+                </div>
+              ) : null}
               {!isJiraProviderType(providerDraft.type) ? (
                 <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.45 }}>
                   Use a GitHub Personal Access Token. Fine-grained tokens should grant issue write access for the selected repository.
@@ -3029,13 +3494,17 @@ function SyncCenterSurface(props: {
                           {getProviderProjectLabel(selectedProvider?.type)}
                         </td>
                         <td style={statusMappingCellStyle()}>
-                          <input
-                            style={inputStyle()}
+                          <UpstreamProjectAutocomplete
+                            companyId={companyId}
+                            providerId={selectedProvider?.id ?? null}
+                            providerType={selectedProvider?.type ?? null}
+                            label={getProviderProjectLabel(selectedProvider?.type)}
+                            hideLabel
                             value={mappingModal.draft.jiraProjectKey}
                             placeholder={getProviderProjectPlaceholder(selectedProvider?.type)}
-                            onChange={(event) => setMappingModal((current) => current ? {
+                            onChange={(value) => setMappingModal((current) => current ? {
                               ...current,
-                              draft: { ...current.draft, jiraProjectKey: event.target.value }
+                              draft: { ...current.draft, jiraProjectKey: value }
                             } : null)}
                           />
                         </td>
@@ -3068,7 +3537,7 @@ function SyncCenterSurface(props: {
                   <div style={{ fontSize: 12, opacity: 0.75 }}>
                     {getSuggestedUpstreamProjectKey(selectedProvider?.type, projectPage.data) || getSuggestedUpstreamProjectKey(selectedProvider?.type, activeProject)
                       ? `Prefilled from this Paperclip project's bound GitHub repository: ${getSuggestedUpstreamProjectKey(selectedProvider?.type, projectPage.data) || getSuggestedUpstreamProjectKey(selectedProvider?.type, activeProject)}. You can still override it here.`
-                      : 'Use a GitHub repository URL or `owner/repo`. Filters below apply to the selected repository feed.'}
+                      : 'Use `owner/repo`. Filters below apply to the selected repository feed.'}
                   </div>
                 ) : null}
                 <div style={{
@@ -3401,7 +3870,7 @@ export function JiraSyncDashboardWidget(): React.JSX.Element {
     <section style={cardStyle()}>
       <div style={stackStyle(12)}>
         <div style={rowStyle()}>
-          <h3 style={{ margin: 0 }}>Issue Sync</h3>
+          <h3 style={{ margin: 0 }}>External Issue Sync</h3>
           <span style={badgeStyle(summary.data?.mappingCount ? 'synced' : 'local')}>
             {summary.data?.mappingCount ? `${summary.data.mappingCount} mapping${summary.data.mappingCount === 1 ? '' : 's'}` : 'No mappings'}
           </span>
@@ -3489,7 +3958,7 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
             <div style={stackStyle(8)}>
               <div style={rowStyle()}>
-                <h3 style={{ margin: 0 }}>Issue Sync</h3>
+                <h3 style={{ margin: 0 }}>External Issue Sync</h3>
                 <span style={healthBadgeStyle(isSynced ? 'connected' : 'not_tested')}>
                   {isSynced ? 'Synced' : 'Local only'}
                 </span>
@@ -3981,7 +4450,7 @@ export function JiraSyncLauncherModal(): React.JSX.Element {
       companyId={companyId}
       scopeProjectId={context.entityType === 'project' ? context.entityId ?? undefined : undefined}
       scopeIssueId={context.entityType === 'issue' ? context.entityId ?? undefined : undefined}
-      embeddedTitle="Issue Sync"
+      embeddedTitle="External Issue Sync"
       modal
     />
   );

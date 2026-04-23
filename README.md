@@ -1,8 +1,14 @@
 # paperclip-external-issues-plugin
 
-Issue Sync is a Paperclip plugin for teams that plan in Paperclip but still need an external issue tracker to remain the system of record.
+External Issue Sync is a Paperclip plugin for teams that plan in Paperclip but still need Jira Data Center, Jira Cloud, or GitHub issues to remain the system of record.
 
 Supports Jira Data Center and GitHub Issues with rigorous manual validation, plus Jira Cloud through the same shared provider architecture with implementation in place but no full end-to-end validation yet.
+
+## Example
+
+* Configure issue providers of the supported type:
+  ![providres](./docs/assets/providers.png)
+* 
 
 ## Provider support
 
@@ -31,6 +37,7 @@ This version now has a fuller provider-aware sync flow:
 
 - the hosted sync center lets users create reusable upstream providers, while project and issue sync surfaces configure one Paperclip project at a time
 - the settings surface is now provider-only, and project-scoped sync opens on a dedicated page for the selected Paperclip project instead of mixing all project settings in one view
+- each project page now groups configuration into tabs for essential settings, agent access, project mappings, and status mapping, while sync actions and status stay pinned at the bottom
 - provider definitions live in plugin config so one upstream connection can be reused across many Paperclip projects
 - provider config writes stay backward-compatible with older Paperclip host schemas by storing a legacy-safe outer shape while preserving the real provider kind for the plugin
 - providers are managed on their own settings page, and each provider opens on its own detail page with `Back` navigation instead of a nested popup
@@ -39,6 +46,7 @@ This version now has a fuller provider-aware sync flow:
 - legacy single-provider config using `jiraBaseUrl`, `jiraUserEmail`, `jiraToken`, or `jiraTokenRef` still works as a migration path
 - saved provider tokens stay hidden in the UI; users only enter a new token when they want to replace it
 - each Paperclip project keeps its own selected provider, default assignee, default status, cadence, and Jira mappings inside plugin state
+- the essential project tab owns the default upstream project or repository, and saving that value automatically keeps a primary mapping in place for the project
 - GitHub-backed Paperclip projects can infer the default repository from the project's bound GitHub workspace, so GitHub issue sync setup starts with the existing project binding when available
 - GitHub issue sync now preserves close reasons like `Completed`, `Not planned`, and `Duplicate` in the upstream status UI while still letting the default closed-family mapping resolve those issues locally without extra setup
 - each Paperclip project can define a default Jira-to-Paperclip status plus explicit Jira status mappings such as `Done -> done`, and each mapping row can optionally assign a Paperclip agent or `None`
