@@ -1,8 +1,22 @@
-# paperclip-jira-plugin
+# paperclip-external-issues-plugin
 
-Issue Sync is a Paperclip plugin for teams that plan in Paperclip but still need an upstream issue tracker to remain the system of record.
+Issue Sync is a Paperclip plugin for teams that plan in Paperclip but still need an external issue tracker to remain the system of record.
 
-The plugin currently supports Jira Data Center end-to-end, keeps legacy single-provider Jira installs working, and now has the provider-platform foundations for Jira Cloud and GitHub Issues behind the same Paperclip sync UI.
+Supports Jira Data Center and GitHub Issues with rigorous manual validation, plus Jira Cloud through the same shared provider architecture with implementation in place but no full end-to-end validation yet.
+
+## Provider support
+
+| Feature | Jira Data Center | GitHub Issues | Jira Cloud |
+| --- | --- | --- | --- |
+| Provider configuration | Supported, tested | Supported, tested | Supported, not yet fully validated |
+| Project or repository mapping | Supported, tested | Supported, tested | Supported, not yet fully validated |
+| Import and refresh external issues | Supported, tested | Supported, tested | Implemented, not yet fully validated |
+| Create upstream issue from Paperclip | Supported, tested | Supported, tested | Implemented, not yet fully validated |
+| Read and post comments | Supported, tested | Supported, tested | Implemented, not yet fully validated |
+| Search and update assignees | Supported, tested | Supported, tested | Implemented, not yet fully validated |
+| Read and update upstream status | Supported, tested | Supported, tested | Implemented, not yet fully validated |
+| Project-scoped agent tools | Supported, tested | Supported, tested | Implemented, not yet fully validated |
+| Overall provider confidence | Production-ready in this repo | Production-ready in this repo | Experimental until validated |
 
 ## What this repo contains
 
@@ -21,10 +35,12 @@ This version now has a fuller provider-aware sync flow:
 - provider config writes stay backward-compatible with older Paperclip host schemas by storing a legacy-safe outer shape while preserving the real provider kind for the plugin
 - providers are managed on their own settings page, and each provider opens on its own detail page with `Back` navigation instead of a nested popup
 - provider cards separate neutral metadata badges from live health, so saved tokens and provider type stay informational while connectivity shows as `Connected`, `Degraded`, `Not tested`, or `Needs config`
+- each Paperclip project can opt selected agents into provider-agnostic upstream issue tools, so agent runs can read or update linked upstream issues only when that specific project allowlists their `agent.id`
 - legacy single-provider config using `jiraBaseUrl`, `jiraUserEmail`, `jiraToken`, or `jiraTokenRef` still works as a migration path
 - saved provider tokens stay hidden in the UI; users only enter a new token when they want to replace it
 - each Paperclip project keeps its own selected provider, default assignee, default status, cadence, and Jira mappings inside plugin state
 - GitHub-backed Paperclip projects can infer the default repository from the project's bound GitHub workspace, so GitHub issue sync setup starts with the existing project binding when available
+- GitHub issue sync now preserves close reasons like `Completed`, `Not planned`, and `Duplicate` in the upstream status UI while still letting the default closed-family mapping resolve those issues locally without extra setup
 - each Paperclip project can define a default Jira-to-Paperclip status plus explicit Jira status mappings such as `Done -> done`, and each mapping row can optionally assign a Paperclip agent or `None`
 - a project can explicitly stay on `Provider: None`, which keeps it Paperclip-only while still allowing `Hide imported issues` for previously imported upstream work
 - opening `Sync Issues` from a project or issue now scopes the modal to the current project, while the settings surface stays focused on provider management
@@ -47,6 +63,22 @@ This version now has a fuller provider-aware sync flow:
 - provider adapters now live behind a shared registry and typed capabilities so new trackers can be added without rewriting the sync shell
 - Jira Data Center continues to use the checked-in generated OpenAPI client, while GitHub provider wiring uses the official Octokit client
 - provider health is now stored per provider and refreshed by both explicit connection tests and successful or failed sync fetches
+
+## Publishing
+
+This package is prepared to publish to npm as `paperclip-external-issues-plugin`.
+
+Release flow:
+
+1. Run `pnpm typecheck`, `pnpm test`, and `pnpm build`.
+2. Optionally run `npm pack --dry-run` to inspect the publish payload.
+3. Create a GitHub Release with a semver tag such as `v0.1.2`.
+4. The release workflow in [`.github/workflows/release.yml`](/Users/andriy/IdeaProjects/paperclip-jira-plugin/.github/workflows/release.yml) stamps the tag version, rebuilds, reruns checks, and publishes to npm with provenance.
+
+Compatibility note:
+
+- The npm package name is `paperclip-external-issues-plugin`.
+- The installed Paperclip plugin id remains `paperclip-jira-plugin` so existing local installs and saved plugin state continue to work.
 
 ## Important note on Atlassian MCP
 

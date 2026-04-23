@@ -31,7 +31,7 @@ async function loadEsbuild() {
   } catch (error) {
     if (isMissingDependencyError(error, 'esbuild')) {
       console.error(
-        '[paperclip-jira-plugin] Missing build dependency "esbuild". '
+        '[paperclip-external-issues-plugin] Missing build dependency "esbuild". '
         + 'Run `pnpm install` in this checkout before running `pnpm build`, `pnpm test:e2e`, or `pnpm verify:manual`.'
       );
       process.exit(1);
@@ -106,7 +106,7 @@ if (watch) {
   });
 
   await Promise.all(buildContexts.map(async (buildContext) => buildContext.watch()));
-  console.log('[paperclip-jira-plugin] watch mode enabled for manifest, worker, and ui');
+  console.log('[paperclip-external-issues-plugin] watch mode enabled for manifest, worker, and ui');
 } else {
   await Promise.all([
     build(manifestBuildOptions),
@@ -114,5 +114,5 @@ if (watch) {
     build(uiBuildOptions)
   ]);
 
-  console.log('[paperclip-jira-plugin] build complete');
+  console.log('[paperclip-external-issues-plugin] build complete');
 }

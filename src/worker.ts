@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Octokit } from '@octokit/rest';
-import { definePlugin, runWorker, type Issue, type IssueComment, type PluginLauncherRegistration } from '@paperclipai/plugin-sdk';
+import { definePlugin, runWorker, type Issue, type IssueComment, type PluginLauncherRegistration, type ToolResult, type ToolRunContext } from '@paperclipai/plugin-sdk';
 import { ApiApi as JiraApiClient } from '../generated/jira-dc-client/9.12.0/apis/ApiApi.ts';
 import {
   Configuration as JiraApiConfiguration,
@@ -26,6 +26,7 @@ import {
 } from './providers/shared/config.ts';
 import type { ProviderType } from './providers/shared/types.ts';
 import { parseRepositoryReference } from './github-repo.ts';
+import { getIssueProviderAgentToolDeclaration } from './issue-provider-agent-tools.ts';
 
 const SETTINGS_SCOPE = {
   scopeKind: 'instance' as const,
@@ -131,6 +132,7 @@ interface JiraProjectSyncConfig {
   projectId?: string;
   projectName: string;
   providerId?: string;
+  agentIssueProviderAccess?: AgentIssueProviderAccess;
   defaultAssignee?: JiraUserReference;
   defaultStatus?: PaperclipIssueStatus;
   defaultStatusAssigneeAgentId?: string | null;
@@ -149,6 +151,11 @@ interface JiraConfig {
   userEmail?: string;
   token?: string;
   defaultIssueType: string;
+}
+
+interface AgentIssueProviderAccess {
+  enabled: boolean;
+  allowedAgentIds: string[];
 }
 
 interface GitHubConfig {
@@ -196,6 +203,8 @@ interface JiraCommentRecord {
   createdAt: string;
   updatedAt: string;
 }
+
+type GitHubIssueStateReason = 'completed' | 'not_planned' | 'duplicate' | 'reopened';
 
 interface JiraIssueLinkData {
   issueId: string;
@@ -252,6 +261,39 @@ function normalizeOptionalString(value: unknown): string | undefined {
 
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function normalizeBoolean(value: unknown): boolean | undefined {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  return undefined;
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value
+        .map((entry) => normalizeOptionalString(entry))
+        .filter((entry): entry is string => Boolean(entry))
+    : [];
+}
+
+function normalizeAgentIssueProviderAccess(value: unknown): AgentIssueProviderAccess | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  const record = value as Record<string, unknown>;
+  const enabled = normalizeBoolean(record.enabled);
+  if (enabled === undefined) {
+    return undefined;
+  }
+
+  return {
+    enabled,
+    allowedAgentIds: normalizeStringArray(record.allowedAgentIds)
+  };
 }
 
 function normalizeInputRecord(input: unknown): Record<string, unknown> {
@@ -568,6 +610,9 @@ function normalizeProjectConfig(value: unknown, index: number): JiraProjectSyncC
     projectName,
     ...(normalizeOptionalString(record.projectId) ? { projectId: normalizeOptionalString(record.projectId) } : {}),
     ...(normalizeOptionalString(record.providerId) ? { providerId: normalizeOptionalString(record.providerId) } : {}),
+    ...(normalizeAgentIssueProviderAccess(record.agentIssueProviderAccess)
+      ? { agentIssueProviderAccess: normalizeAgentIssueProviderAccess(record.agentIssueProviderAccess) }
+      : {}),
     ...(normalizeJiraUserReference(record.defaultAssignee) ? { defaultAssignee: normalizeJiraUserReference(record.defaultAssignee) } : {}),
     ...(normalizePaperclipStatus(record.defaultStatus) ? { defaultStatus: normalizePaperclipStatus(record.defaultStatus) } : {}),
     ...(Object.prototype.hasOwnProperty.call(record, 'defaultStatusAssigneeAgentId')
@@ -668,6 +713,10 @@ function legacyMappingsToProjectConfigs(params: {
       projectName,
       ...(mapping.paperclipProjectId ? { projectId: mapping.paperclipProjectId } : {}),
       ...(mapping.providerId ? { providerId: mapping.providerId } : {}),
+      agentIssueProviderAccess: {
+        enabled: false,
+        allowedAgentIds: []
+      },
       ...(legacyCompanyFilters.assignee ? { defaultAssignee: legacyCompanyFilters.assignee } : {}),
       defaultStatus: DEFAULT_PAPERCLIP_STATUS,
       defaultStatusAssigneeAgentId: null,
@@ -815,9 +864,9 @@ function resolveMappedPaperclipState(
     return {};
   }
 
-  const normalizedStatusName = normalizeStatusName(jiraStatusName);
+  const normalizedStatusNames = getNormalizedStatusAliases(jiraStatusName);
   const matchedMapping = getEffectiveStatusMappings(projectConfig).find((entry) => (
-    normalizeStatusName(entry.jiraStatus) === normalizedStatusName
+    normalizedStatusNames.includes(normalizeStatusName(entry.jiraStatus))
   ));
 
   return {
@@ -826,6 +875,84 @@ function resolveMappedPaperclipState(
       ? (matchedMapping.assigneeAgentId ?? null)
       : (projectConfig.defaultStatusAssigneeAgentId ?? null)
   };
+}
+
+function normalizeGitHubStateReason(value: string | null | undefined): GitHubIssueStateReason | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  switch (value.trim().toLowerCase()) {
+    case 'completed':
+      return 'completed';
+    case 'not_planned':
+    case 'not planned':
+      return 'not_planned';
+    case 'duplicate':
+      return 'duplicate';
+    case 'reopened':
+      return 'reopened';
+    default:
+      return undefined;
+  }
+}
+
+function getGitHubStatusName(
+  state: string | null | undefined,
+  stateReason: string | null | undefined
+): string {
+  if (String(state).toLowerCase() !== 'closed') {
+    return 'Open';
+  }
+
+  switch (normalizeGitHubStateReason(stateReason)) {
+    case 'completed':
+      return 'Completed';
+    case 'not_planned':
+      return 'Not planned';
+    case 'duplicate':
+      return 'Duplicate';
+    case 'reopened':
+      return 'Reopened';
+    default:
+      return 'Closed';
+  }
+}
+
+function getGitHubStatusCategory(
+  state: string | null | undefined,
+  stateReason: string | null | undefined
+): string {
+  if (String(state).toLowerCase() !== 'closed') {
+    return 'Open';
+  }
+
+  return normalizeGitHubStateReason(stateReason) === 'not_planned' ? 'Cancelled' : 'Done';
+}
+
+function getNormalizedStatusAliases(statusName: string): string[] {
+  const normalizedStatusName = normalizeStatusName(statusName);
+  const aliases = new Set<string>([normalizedStatusName]);
+  if (['completed', 'not planned', 'duplicate'].includes(normalizedStatusName)) {
+    aliases.add('closed');
+  }
+  return [...aliases];
+}
+
+function parseGitHubTransition(
+  transitionId: string
+): { state: 'open' | 'closed'; stateReason?: Exclude<GitHubIssueStateReason, 'reopened'> } {
+  const normalized = transitionId.trim().toLowerCase();
+  if (normalized === 'closed' || normalized === 'completed' || normalized === 'closed:completed') {
+    return { state: 'closed', stateReason: 'completed' };
+  }
+  if (normalized === 'not_planned' || normalized === 'not planned' || normalized === 'closed:not_planned') {
+    return { state: 'closed', stateReason: 'not_planned' };
+  }
+  if (normalized === 'duplicate' || normalized === 'closed:duplicate') {
+    return { state: 'closed', stateReason: 'duplicate' };
+  }
+  return { state: 'open' };
 }
 
 async function getAvailableProviders(ctx: PluginSetupContext): Promise<ProviderConfig[]> {
@@ -1450,6 +1577,7 @@ function normalizeGitHubIssueRecord(
     title: string;
     body?: string | null;
     state?: string;
+    state_reason?: string | null;
     html_url?: string;
     assignees?: Array<{ login?: string | null }> | null;
     user?: { login?: string | null } | null;
@@ -1468,8 +1596,8 @@ function normalizeGitHubIssueRecord(
     description: value.body ?? '',
     ...(assigneeDisplayName ? { assigneeDisplayName } : {}),
     ...(creatorDisplayName ? { creatorDisplayName } : {}),
-    statusName: value.state === 'closed' ? 'Closed' : 'Open',
-    statusCategory: value.state === 'closed' ? 'Done' : 'Open',
+    statusName: getGitHubStatusName(value.state, value.state_reason),
+    statusCategory: getGitHubStatusCategory(value.state, value.state_reason),
     updatedAt: value.updated_at ?? new Date().toISOString(),
     createdAt: value.created_at ?? new Date().toISOString(),
     issueType: 'Issue',
@@ -1665,7 +1793,9 @@ async function addGitHubComment(
 function listGitHubTransitions(): Array<{ id: string; name: string }> {
   return [
     { id: 'open', name: 'Open' },
-    { id: 'closed', name: 'Closed' }
+    { id: 'closed:completed', name: 'Completed' },
+    { id: 'closed:not_planned', name: 'Not planned' },
+    { id: 'closed:duplicate', name: 'Duplicate' }
   ];
 }
 
@@ -1682,12 +1812,13 @@ async function transitionGitHubIssue(
     throw new Error('GitHub issue key must look like owner/repo#123.');
   }
 
-  const state = transitionId === 'closed' ? 'closed' : 'open';
+  const { state, stateReason } = parseGitHubTransition(transitionId);
   await githubApiCall(ctx, config, async (api) => await api.rest.issues.update({
     owner: repo.owner,
     repo: repo.repo,
     issue_number: issueNumber,
-    state
+    state,
+    ...(stateReason ? { state_reason: stateReason } : {})
   }));
 }
 
@@ -1727,7 +1858,11 @@ async function syncGitHubStatusFromPaperclip(
     ctx,
     config,
     issueKey,
-    paperclipStatus === 'done' || paperclipStatus === 'cancelled' ? 'closed' : 'open'
+    paperclipStatus === 'cancelled'
+      ? 'closed:not_planned'
+      : paperclipStatus === 'done'
+        ? 'closed:completed'
+        : 'open'
   );
   return true;
 }
@@ -3368,6 +3503,10 @@ async function buildSettingsRegistrationData(
     paperclipProjectName: projectConfig.projectName,
     ...(mapping.filters ? { filters: mapping.filters } : {})
   })) ?? [];
+  const agentIssueProviderAccess = projectConfig?.agentIssueProviderAccess ?? {
+    enabled: false,
+    allowedAgentIds: []
+  };
   const entrySurface = issueId ? 'issue' : selectedProject ? 'project' : 'global';
   const requiresProjectSelection = !selectedProject;
   const providerTypeOptions = buildProviderTypeOptions();
@@ -3419,6 +3558,7 @@ async function buildSettingsRegistrationData(
           projectId: selectedProject.id,
           projectName: selectedProject.name,
           providerId: projectConfig?.providerId ?? null,
+          agentIssueProviderAccess,
           defaultAssignee: projectConfig?.defaultAssignee ?? null,
           defaultStatus: projectConfig?.defaultStatus ?? DEFAULT_PAPERCLIP_STATUS,
           defaultStatusAssigneeAgentId: projectConfig?.defaultStatusAssigneeAgentId ?? null,
@@ -3435,6 +3575,7 @@ async function buildSettingsRegistrationData(
           projectId: selectedProject.id,
           projectName: selectedProject.name,
           selectedProviderId: projectConfig?.providerId ?? null,
+          agentIssueProviderAccess,
           suggestedUpstreamProjectKeys: selectedProjectGitHubRepository
             ? { github_issues: selectedProjectGitHubRepository }
             : undefined,
@@ -4145,6 +4286,92 @@ async function setUpstreamIssueAssignee(
   };
 }
 
+type AuthorizedIssueProviderToolContext = {
+  settings: JiraSyncSettings;
+  issue: Issue;
+  projectConfig: JiraProjectSyncConfig;
+  mapping: JiraMapping;
+  providerId: string;
+  providerType: ProviderType;
+  link: JiraIssueLinkData | null;
+};
+
+async function authorizeIssueProviderTool(
+  ctx: PluginSetupContext,
+  runCtx: ToolRunContext,
+  paperclipIssueId: string,
+  options?: {
+    requireLinkedIssue?: boolean;
+  }
+): Promise<AuthorizedIssueProviderToolContext> {
+  const settings = normalizeSettings(await ctx.state.get(SETTINGS_SCOPE));
+  const issue = await ctx.issues.get(paperclipIssueId, runCtx.companyId);
+  if (!issue) {
+    throw new Error('Paperclip issue not found.');
+  }
+  if (!issue.projectId) {
+    throw new Error('This Paperclip issue is not attached to a project.');
+  }
+  if (issue.projectId !== runCtx.projectId) {
+    throw new Error('Issue provider tools can only access issues in the agent run project.');
+  }
+
+  const projectConfig = getProjectConfig(settings, runCtx.companyId, issue.projectId);
+  if (!projectConfig) {
+    throw new Error('Issue provider tools are not enabled for this project.');
+  }
+
+  const access = projectConfig.agentIssueProviderAccess;
+  if (!access?.enabled) {
+    throw new Error('Issue provider tools are not enabled for this project.');
+  }
+  if (!access.allowedAgentIds.includes(runCtx.agentId)) {
+    throw new Error('This agent is not allowed to use issue provider tools for this project.');
+  }
+  if (!projectConfig.providerId) {
+    throw new Error('This project does not have an issue provider selected.');
+  }
+
+  const mapping = await resolveMappingForIssue(ctx, settings, runCtx.companyId, paperclipIssueId);
+  if (!mapping) {
+    throw new Error('This project does not have an upstream mapping yet.');
+  }
+
+  const providerId = projectConfig.providerId;
+  const providerType = await getProviderTypeById(ctx, providerId);
+  const link = await findOrRecoverLinkedIssueEntity(ctx, settings, runCtx.companyId, paperclipIssueId);
+  if (options?.requireLinkedIssue && !link) {
+    throw new Error('This Paperclip issue is not linked to an upstream issue yet.');
+  }
+
+  return {
+    settings,
+    issue,
+    projectConfig,
+    mapping,
+    providerId,
+    providerType,
+    link
+  };
+}
+
+function buildToolContent(title: string, lines: string[]): string {
+  return [title, ...lines.filter(Boolean)].join('\n');
+}
+
+function buildToolSuccess(data: unknown, content: string): ToolResult {
+  return {
+    data,
+    content
+  };
+}
+
+function buildToolError(error: unknown): ToolResult {
+  return {
+    error: error instanceof Error ? error.message : 'Tool execution failed.'
+  };
+}
+
 async function findCleanupCandidates(
   ctx: PluginSetupContext,
   companyId: string,
@@ -4191,6 +4418,7 @@ async function persistProjectRegistration(
     projectId?: string;
     projectName?: string;
     providerId?: string;
+    agentIssueProviderAccess?: AgentIssueProviderAccess;
     defaultAssignee?: JiraUserReference;
     defaultStatus?: PaperclipIssueStatus;
     defaultStatusAssigneeAgentId?: string | null;
@@ -4207,6 +4435,7 @@ async function persistProjectRegistration(
   const explicitProjectId = normalizeOptionalString(record.projectId);
   const explicitProjectName = normalizeOptionalString(record.projectName);
   const explicitProviderId = normalizeOptionalString(record.providerId);
+  const explicitAgentIssueProviderAccess = normalizeAgentIssueProviderAccess(record.agentIssueProviderAccess);
   const explicitDefaultAssignee = normalizeJiraUserReference(record.defaultAssignee);
   const explicitDefaultStatus = normalizePaperclipStatus(record.defaultStatus) ?? DEFAULT_PAPERCLIP_STATUS;
   const explicitDefaultStatusAssigneeAgentId = Object.prototype.hasOwnProperty.call(record, 'defaultStatusAssigneeAgentId')
@@ -4228,6 +4457,7 @@ async function persistProjectRegistration(
         projectId: explicitProjectId,
         projectName: explicitProjectName,
         providerId: explicitProviderId,
+        agentIssueProviderAccess: explicitAgentIssueProviderAccess,
         defaultAssignee: explicitDefaultAssignee,
         defaultStatus: explicitDefaultStatus,
         defaultStatusAssigneeAgentId: explicitDefaultStatusAssigneeAgentId,
@@ -4247,6 +4477,10 @@ async function persistProjectRegistration(
           projectId: normalized.paperclipProjectId,
           projectName: normalized.paperclipProjectName,
           providerId: normalized.providerId ?? legacyFallbackProviderId,
+          agentIssueProviderAccess: {
+            enabled: false,
+            allowedAgentIds: []
+          },
           defaultAssignee: normalized.filters?.assignee,
           defaultStatus: DEFAULT_PAPERCLIP_STATUS,
           defaultStatusAssigneeAgentId: null as string | null,
@@ -4260,7 +4494,8 @@ async function persistProjectRegistration(
         projectId?: string;
         projectName: string;
         providerId?: string;
-        defaultAssignee?: string;
+        agentIssueProviderAccess: AgentIssueProviderAccess;
+        defaultAssignee?: JiraUserReference;
         defaultStatus: PaperclipIssueStatus;
         defaultStatusAssigneeAgentId: string | null;
         mappings: JiraMapping[];
@@ -4283,6 +4518,10 @@ async function persistProjectRegistration(
       projectName: groupedInput.projectName,
       ...(groupedInput.projectId ? { projectId: groupedInput.projectId } : {}),
       ...(groupedInput.providerId ? { providerId: groupedInput.providerId } : {}),
+      agentIssueProviderAccess: groupedInput.agentIssueProviderAccess ?? existing?.agentIssueProviderAccess ?? {
+        enabled: false,
+        allowedAgentIds: []
+      },
       ...(resolvedDefaultAssignee ? { defaultAssignee: resolvedDefaultAssignee } : {}),
       defaultStatus: groupedInput.defaultStatus ?? existing?.defaultStatus ?? DEFAULT_PAPERCLIP_STATUS,
       defaultStatusAssigneeAgentId:
@@ -4323,9 +4562,194 @@ async function persistProjectRegistration(
   return await buildSettingsRegistrationData(ctx, companyId, selectedProjectId);
 }
 
+function registerIssueProviderAgentTools(ctx: PluginSetupContext): void {
+  ctx.tools.register(
+    'get_upstream_issue',
+    getIssueProviderAgentToolDeclaration('get_upstream_issue'),
+    async (params, runCtx) => {
+      try {
+        const record = normalizeInputRecord(params);
+        const paperclipIssueId = normalizeOptionalString(record.paperclipIssueId);
+        if (!paperclipIssueId) {
+          throw new Error('paperclipIssueId is required.');
+        }
+
+        await authorizeIssueProviderTool(ctx, runCtx, paperclipIssueId, { requireLinkedIssue: true });
+        const detail = await buildIssueJiraDetails(ctx, runCtx.companyId, paperclipIssueId);
+        const upstreamStatus = detail.upstreamStatus as { name?: string; category?: string } | undefined;
+
+        return buildToolSuccess(
+          detail,
+          buildToolContent('Upstream issue loaded.', [
+            typeof detail.upstreamIssueKey === 'string' ? `Issue: ${detail.upstreamIssueKey}` : '',
+            typeof detail.openInProviderUrl === 'string' ? `URL: ${detail.openInProviderUrl}` : '',
+            upstreamStatus?.name ? `Status: ${upstreamStatus.name}${upstreamStatus.category ? ` (${upstreamStatus.category})` : ''}` : ''
+          ])
+        );
+      } catch (error) {
+        return buildToolError(error);
+      }
+    }
+  );
+
+  ctx.tools.register(
+    'list_upstream_comments',
+    getIssueProviderAgentToolDeclaration('list_upstream_comments'),
+    async (params, runCtx) => {
+      try {
+        const record = normalizeInputRecord(params);
+        const paperclipIssueId = normalizeOptionalString(record.paperclipIssueId);
+        if (!paperclipIssueId) {
+          throw new Error('paperclipIssueId is required.');
+        }
+
+        await authorizeIssueProviderTool(ctx, runCtx, paperclipIssueId, { requireLinkedIssue: true });
+        const detail = await buildIssueJiraDetails(ctx, runCtx.companyId, paperclipIssueId);
+        const comments = Array.isArray(detail.upstreamComments) ? detail.upstreamComments : [];
+
+        return buildToolSuccess(
+          {
+            paperclipIssueId,
+            comments
+          },
+          buildToolContent('Upstream comments loaded.', [
+            `Comments: ${comments.length}`
+          ])
+        );
+      } catch (error) {
+        return buildToolError(error);
+      }
+    }
+  );
+
+  ctx.tools.register(
+    'add_upstream_comment',
+    getIssueProviderAgentToolDeclaration('add_upstream_comment'),
+    async (params, runCtx) => {
+      try {
+        const record = normalizeInputRecord(params);
+        const paperclipIssueId = normalizeOptionalString(record.paperclipIssueId);
+        const body = typeof record.body === 'string' ? record.body.trim() : '';
+        if (!paperclipIssueId || !body) {
+          throw new Error('paperclipIssueId and body are required.');
+        }
+
+        const authorized = await authorizeIssueProviderTool(ctx, runCtx, paperclipIssueId, { requireLinkedIssue: true });
+        const result = await addUpstreamCommentForProvider(ctx, authorized.link?.providerId ?? authorized.mapping.providerId, authorized.link!.jiraIssueKey, body);
+
+        return buildToolSuccess(
+          {
+            paperclipIssueId,
+            upstreamCommentId: result.id
+          },
+          buildToolContent('Upstream comment posted.', [
+            `Issue: ${authorized.link?.jiraIssueKey ?? ''}`,
+            `Comment ID: ${result.id}`
+          ])
+        );
+      } catch (error) {
+        return buildToolError(error);
+      }
+    }
+  );
+
+  ctx.tools.register(
+    'set_upstream_status',
+    getIssueProviderAgentToolDeclaration('set_upstream_status'),
+    async (params, runCtx) => {
+      try {
+        const record = normalizeInputRecord(params);
+        const paperclipIssueId = normalizeOptionalString(record.paperclipIssueId);
+        const transitionId = normalizeOptionalString(record.transitionId);
+        if (!paperclipIssueId || !transitionId) {
+          throw new Error('paperclipIssueId and transitionId are required.');
+        }
+
+        await authorizeIssueProviderTool(ctx, runCtx, paperclipIssueId, { requireLinkedIssue: true });
+        const result = await setUpstreamIssueStatus(ctx, runCtx.companyId, paperclipIssueId, transitionId);
+        return buildToolSuccess(result, typeof result.message === 'string' ? result.message : 'Updated upstream status.');
+      } catch (error) {
+        return buildToolError(error);
+      }
+    }
+  );
+
+  ctx.tools.register(
+    'set_upstream_assignee',
+    getIssueProviderAgentToolDeclaration('set_upstream_assignee'),
+    async (params, runCtx) => {
+      try {
+        const record = normalizeInputRecord(params);
+        const paperclipIssueId = normalizeOptionalString(record.paperclipIssueId);
+        const assignee = normalizeJiraUserReference(record.assignee);
+        if (!paperclipIssueId || !assignee) {
+          throw new Error('paperclipIssueId and assignee are required.');
+        }
+
+        await authorizeIssueProviderTool(ctx, runCtx, paperclipIssueId, { requireLinkedIssue: true });
+        const result = await setUpstreamIssueAssignee(ctx, runCtx.companyId, paperclipIssueId, assignee);
+        return buildToolSuccess(result, typeof result.message === 'string' ? result.message : 'Updated upstream assignee.');
+      } catch (error) {
+        return buildToolError(error);
+      }
+    }
+  );
+
+  ctx.tools.register(
+    'search_upstream_users',
+    getIssueProviderAgentToolDeclaration('search_upstream_users'),
+    async (params, runCtx) => {
+      try {
+        const record = normalizeInputRecord(params);
+        const paperclipIssueId = normalizeOptionalString(record.paperclipIssueId);
+        const query = normalizeOptionalString(record.query);
+        if (!paperclipIssueId || !query) {
+          throw new Error('paperclipIssueId and query are required.');
+        }
+
+        const authorized = await authorizeIssueProviderTool(ctx, runCtx, paperclipIssueId);
+        const users = await searchProviderUsers(ctx, authorized.providerType, authorized.providerId, query);
+
+        return buildToolSuccess(
+          {
+            paperclipIssueId,
+            users
+          },
+          buildToolContent('Upstream users loaded.', [
+            `Matches: ${users.length}`
+          ])
+        );
+      } catch (error) {
+        return buildToolError(error);
+      }
+    }
+  );
+
+  ctx.tools.register(
+    'create_upstream_issue',
+    getIssueProviderAgentToolDeclaration('create_upstream_issue'),
+    async (params, runCtx) => {
+      try {
+        const record = normalizeInputRecord(params);
+        const paperclipIssueId = normalizeOptionalString(record.paperclipIssueId);
+        if (!paperclipIssueId) {
+          throw new Error('paperclipIssueId is required.');
+        }
+
+        await authorizeIssueProviderTool(ctx, runCtx, paperclipIssueId);
+        const result = await pushIssueToJira(ctx, runCtx.companyId, paperclipIssueId);
+        return buildToolSuccess(result, typeof result.message === 'string' ? result.message : 'Created upstream issue.');
+      } catch (error) {
+        return buildToolError(error);
+      }
+    }
+  );
+}
+
 const plugin = definePlugin({
   async setup(ctx) {
     ctx.launchers.register(ENTITY_SYNC_LAUNCHER);
+    registerIssueProviderAgentTools(ctx);
 
     ctx.data.register('sync.entryContext', async (input) => {
       const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};

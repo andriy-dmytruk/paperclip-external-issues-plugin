@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import type { PaperclipPluginManifestV1 } from '@paperclipai/plugin-sdk';
 import { PROVIDER_TYPE_OPTIONS } from './providers/shared/types.ts';
+import { ISSUE_PROVIDER_AGENT_TOOLS } from './issue-provider-agent-tools.ts';
 
 const require = createRequire(import.meta.url);
 const packageJson = require('../package.json') as { version?: unknown };
@@ -17,7 +18,7 @@ export const manifest: PaperclipPluginManifestV1 = {
   apiVersion: 1,
   version: MANIFEST_VERSION,
   displayName: 'Issue Sync',
-  description: 'Synchronize upstream issues into Paperclip projects and sync issue/comment changes both ways.',
+  description: 'Synchronize external issues into Paperclip projects and sync issue/comment changes both ways.',
   author: 'Andriy Dmytruk',
   categories: ['connector', 'ui'],
   capabilities: [
@@ -33,6 +34,7 @@ export const manifest: PaperclipPluginManifestV1 = {
     'issues.create',
     'issues.update',
     'agents.read',
+    'agent.tools.register',
     'issue.comments.read',
     'issue.comments.create',
     'jobs.schedule',
@@ -94,6 +96,7 @@ export const manifest: PaperclipPluginManifestV1 = {
       schedule: SCHEDULE_TICK_CRON
     }
   ],
+  tools: ISSUE_PROVIDER_AGENT_TOOLS,
   entrypoints: {
     worker: './dist/worker.js',
     ui: './dist/ui/'

@@ -1,7 +1,7 @@
 {
-  "name": "paperclip-jira-plugin",
+  "name": "paperclip-external-issues-plugin",
   "version": "0.1.1",
-  "description": "Paperclip plugin for synchronizing upstream issues into Paperclip projects.",
+  "description": "Paperclip plugin for synchronizing external issues from Jira Data Center, Jira Cloud, and GitHub Issues.",
   "author": "Andriy Dmytruk",
   "contributors": [
     "Álvaro Sánchez-Mariscal"
@@ -14,12 +14,20 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/alvarosanchez/paperclip-jira-plugin.git"
+    "url": "git+https://github.com/alvarosanchez/paperclip-external-issues-plugin.git"
   },
-  "homepage": "https://github.com/alvarosanchez/paperclip-jira-plugin#readme",
+  "homepage": "https://github.com/alvarosanchez/paperclip-external-issues-plugin#readme",
   "bugs": {
-    "url": "https://github.com/alvarosanchez/paperclip-jira-plugin/issues"
+    "url": "https://github.com/alvarosanchez/paperclip-external-issues-plugin/issues"
   },
+  "keywords": [
+    "paperclip",
+    "plugin",
+    "issues",
+    "jira",
+    "github",
+    "sync"
+  ],
   "files": [
     "dist",
     "README.md",

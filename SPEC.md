@@ -1,6 +1,6 @@
-# Jira Sync plugin specification
+# External Issues plugin specification
 
-Issue Sync is a Paperclip plugin for synchronizing upstream issues into Paperclip projects while keeping Paperclip usable as the primary planning surface.
+Issue Sync is a Paperclip plugin for synchronizing external issues into Paperclip projects while keeping Paperclip usable as the primary planning surface. The published npm package is `paperclip-external-issues-plugin`, while the Paperclip plugin id remains `paperclip-jira-plugin` for install and state compatibility.
 
 ## MVP requirements
 
@@ -32,8 +32,12 @@ Issue Sync is a Paperclip plugin for synchronizing upstream issues into Papercli
 - Manual sync MUST report processed, total, imported, updated, skipped, and failed counts when available.
 - Jira sync settings MUST be saved per Paperclip project, including selected provider, default assignee, default Jira-to-Paperclip status mapping, scheduled cadence, and that project's Jira mappings.
 - When a Paperclip project already carries a GitHub repository binding, GitHub issue sync SHOULD prefill or infer the repository mapping from that project binding before asking the user to type it again.
+- GitHub issue sync SHOULD preserve upstream close reasons such as `Completed`, `Not planned`, and `Duplicate` as distinct upstream statuses while still treating them as part of the closed family for default local status mapping.
 - Project sync settings MUST support explicit Jira-to-Paperclip status mappings so Jira status changes can update the local Paperclip workflow status when configured.
 - Jira-to-Paperclip status mappings SHOULD allow each mapped Jira status, including the default fallback row, to choose a Paperclip agent assignment or `None`.
+- Project sync settings MUST default agent issue-provider tool access to disabled, and MAY enable it only through a per-project allowlist of Paperclip `agent.id` values.
+- The plugin MUST declare provider-agnostic upstream issue tools statically and MUST enforce project/provider/agent authorization at runtime before any agent tool call runs.
+- Agent tool scope in v1 MUST stay limited to issue-level upstream reads, comments, assignee/status updates, user search, and upstream issue creation for an allowed Paperclip issue.
 - Provider-specific project settings MUST remain preserved in state when a project switches to `Provider: None` so they can return if a real provider is selected again later.
 - Sync mappings MUST carry their own upstream issue filters so teams can tune each configured Paperclip project independently.
 - Project default assignee and mapping author/assignee filters MUST use structured Jira user references keyed by durable Jira identity, not plain display text.
