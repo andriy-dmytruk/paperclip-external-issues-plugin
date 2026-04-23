@@ -102,6 +102,7 @@ export const manifest: PaperclipPluginManifestV1 = {
     ui: './dist/ui/'
   },
   ui: {
+    launchers: [],
     slots: [
       {
         type: 'dashboardWidget',
@@ -128,22 +129,13 @@ export const manifest: PaperclipPluginManifestV1 = {
         id: 'paperclip-external-issues-plugin-settings-page',
         displayName: 'External Issue Sync',
         exportName: 'JiraSyncSettingsPage'
-      }
-    ],
-    launchers: [
+      },
       {
-        id: 'paperclip-external-issues-plugin-entity-launcher',
+        type: 'toolbarButton',
+        id: 'paperclip-external-issues-plugin-project-sync-toolbar-button',
         displayName: 'External Issue Sync',
-        placementZone: 'toolbarButton',
-        entityTypes: ['project'],
-        action: {
-          type: 'openModal',
-          target: 'JiraSyncLauncherModal'
-        },
-        render: {
-          environment: 'hostOverlay',
-          bounds: 'wide'
-        }
+        exportName: 'JiraSyncEntityToolbarButton',
+        entityTypes: ['project']
       }
     ]
   }

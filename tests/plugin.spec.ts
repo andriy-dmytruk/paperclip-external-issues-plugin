@@ -167,19 +167,17 @@ function makeAgent(overrides: Record<string, unknown> = {}) {
   } as any;
 }
 
-test('manifest keeps sync launchers on project and issue surfaces only', async () => {
+test('manifest keeps project sync mounted through a toolbar slot', async () => {
   assert.equal(manifest.id, 'paperclip-external-issues-plugin');
   assert.equal(manifest.displayName, 'External Issue Sync');
   assert.ok(manifest.ui?.slots?.some((slot) => slot.type === 'settingsPage'));
+  assert.ok(manifest.ui?.slots?.some((slot) => slot.id === 'paperclip-external-issues-plugin-project-sync-toolbar-button'));
   assert.ok((manifest.instanceConfigSchema as any)?.properties?.jiraToken);
   assert.deepEqual(
     (manifest.instanceConfigSchema as any)?.properties?.providers?.items?.properties?.type?.enum,
     ['jira', 'jira_dc', 'jira_cloud', 'github_issues']
   );
-  assert.equal(manifest.ui?.launchers?.length, 1);
-  assert.equal(manifest.ui?.launchers?.[0]?.id, 'paperclip-external-issues-plugin-entity-launcher');
-  assert.equal(manifest.ui?.launchers?.[0]?.placementZone, 'toolbarButton');
-  assert.deepEqual(manifest.ui?.launchers?.[0]?.entityTypes, ['project']);
+  assert.equal(manifest.ui?.launchers?.length ?? 0, 0);
 });
 
 test('manifest registers provider-agnostic issue provider agent tools', async () => {

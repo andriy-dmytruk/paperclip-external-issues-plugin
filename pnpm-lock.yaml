@@ -14,6 +14,9 @@ importers:
       '@paperclipai/plugin-sdk':
         specifier: ^2026.416.0
         version: 2026.416.0(react@19.2.5)
+      lucide-react:
+        specifier: ^0.574.0
+        version: 0.574.0(react@19.2.5)
       react:
         specifier: ^19.2.5
         version: 19.2.5
@@ -838,6 +841,11 @@ packages:
   lru-cache@7.18.3:
     resolution: {integrity: sha512-jumlc0BIUrS3qJGgIkWZsyfAM7NCWiBcCDhnd+3NNM5KbBmLTgHVfWBcg6W+rLUsIpzpERPsvwUP7CckAQSOoA==}
     engines: {node: '>=12'}
+
+  lucide-react@0.574.0:
+    resolution: {integrity: sha512-dJ8xb5juiZVIbdSn3HTyHsjjIwUwZ4FNwV0RtYDScOyySOeie1oXZTymST6YPJ4Qwt3Po8g4quhYl4OxtACiuQ==}
+    peerDependencies:
+      react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
   math-intrinsics@1.1.0:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
@@ -1777,6 +1785,10 @@ snapshots:
   lru-cache@11.3.5: {}
 
   lru-cache@7.18.3: {}
+
+  lucide-react@0.574.0(react@19.2.5):
+    dependencies:
+      react: 19.2.5
 
   math-intrinsics@1.1.0: {}
 

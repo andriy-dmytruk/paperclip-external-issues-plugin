@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { RefreshCw, Settings } from 'lucide-react';
 import {
   useHostContext,
   usePluginAction,
@@ -216,6 +217,15 @@ type ProvidersData = {
   }>;
 };
 
+type ProjectToolbarState = {
+  configured: boolean;
+  syncFailed?: boolean;
+  syncStatus?: 'idle' | 'running' | 'success' | 'error' | string;
+  providerType?: ProviderType | null;
+  providerName?: string | null;
+  projectId?: string;
+};
+
 type IssueSyncPresentation = {
   visible: boolean;
   isSynced: boolean;
@@ -348,7 +358,7 @@ function rowStyle(): React.CSSProperties {
   };
 }
 
-type ButtonIconName = 'add' | 'arrow-up' | 'arrow-down' | 'back' | 'close' | 'edit' | 'external' | 'eye' | 'hide' | 'save' | 'sync' | 'user';
+type ButtonIconName = 'add' | 'arrow-up' | 'arrow-down' | 'back' | 'close' | 'edit' | 'external' | 'eye' | 'hide' | 'save' | 'sync' | 'user' | 'settings';
 type ProviderIconSize = 'sm' | 'md';
 
 function renderButtonIcon(icon: ButtonIconName): React.JSX.Element {
@@ -453,6 +463,10 @@ function renderButtonIcon(icon: ButtonIconName): React.JSX.Element {
     );
   }
 
+  if (icon === 'sync') {
+    return <RefreshCw style={iconStyle} strokeWidth={2} />;
+  }
+
   if (icon === 'user') {
     return (
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" style={iconStyle}>
@@ -460,6 +474,10 @@ function renderButtonIcon(icon: ButtonIconName): React.JSX.Element {
         <path d="M3.5 13c.7-2 2.4-3 4.5-3s3.8 1 4.5 3" />
       </svg>
     );
+  }
+
+  if (icon === 'settings') {
+    return <Settings style={iconStyle} strokeWidth={2} />;
   }
 
   return (
@@ -4434,24 +4452,136 @@ export function JiraSyncGlobalToolbarButton(): React.JSX.Element {
 }
 
 export function JiraSyncEntityToolbarButton(): React.JSX.Element {
-  return <></>;
-}
-
-export function JiraSyncLauncherModal(): React.JSX.Element {
   const context = useHostContext();
+  const toast = usePluginToast();
   const companyId = context.companyId ?? '';
+  const projectId = context.entityType === 'project' ? context.entityId ?? '' : '';
+  const [configModalOpen, setConfigModalOpen] = useState(false);
+  const toolbarState = usePluginData<ProjectToolbarState>('sync.projectToolbarState', {
+    companyId,
+    projectId: projectId || undefined
+  });
+  const runSync = useActionRunner<{
+    companyId: string;
+    projectId?: string;
+  }>('sync.runNow');
 
-  if (!companyId) {
+  if (!companyId || !projectId) {
     return <></>;
   }
 
+  const configured = toolbarState.data?.configured === true;
+  const providerType = toolbarState.data?.providerType ?? null;
+  const syncStatus = toolbarState.data?.syncStatus ?? 'idle';
+  const configureLabel = configured
+    ? `Configure ${getProviderTypeLabel(providerType)}`
+    : 'Configure External Issue Sync';
+  const dotColor = syncStatus === 'success'
+    ? '#16a34a'
+    : syncStatus === 'error'
+      ? '#dc2626'
+      : 'color-mix(in srgb, currentColor 36%, transparent)';
+  useEffect(() => {
+    if (!configModalOpen) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setConfigModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [configModalOpen]);
+
   return (
-    <SyncCenterSurface
-      companyId={companyId}
-      scopeProjectId={context.entityType === 'project' ? context.entityId ?? undefined : undefined}
-      scopeIssueId={context.entityType === 'issue' ? context.entityId ?? undefined : undefined}
-      embeddedTitle="External Issue Sync"
-      modal
-    />
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'nowrap' }}>
+      <button
+        type="button"
+        style={{
+          ...buttonStyle('secondary'),
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 8,
+          whiteSpace: 'nowrap'
+        }}
+        title="Open project-specific external issue sync settings."
+        onClick={() => {
+          setConfigModalOpen(true);
+        }}
+      >
+        {configured
+          ? renderProviderIcon(providerType)
+          : renderButtonIcon('settings')}
+        <span>{configureLabel}</span>
+        <span
+          aria-hidden="true"
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: 999,
+            background: dotColor,
+            border: '1px solid color-mix(in srgb, var(--border) 72%, transparent)',
+            flex: '0 0 auto'
+          }}
+        />
+      </button>
+      <button
+        type="button"
+        style={iconButtonStyle()}
+        title="Sync issues now"
+        aria-label="Sync issues now"
+        disabled={runSync.busy || !configured}
+        onClick={() => {
+          if (!configured) {
+            toast({
+              title: 'External Issue Sync',
+              body: 'Configure a provider first, then sync from this button.',
+              tone: 'default'
+            });
+            return;
+          }
+          void runSync.run({
+            companyId,
+            projectId
+          }).then(() => {
+            void toolbarState.refresh();
+          });
+        }}
+      >
+        {renderButtonIcon('sync')}
+      </button>
+      {configModalOpen ? (
+        <div
+          style={modalBackdropStyle()}
+          onClick={() => setConfigModalOpen(false)}
+        >
+          <div
+            style={{ ...modalPanelStyle(980), padding: 0, position: 'relative', overflow: 'hidden' }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <button
+              type="button"
+              style={{ ...iconButtonStyle(), position: 'absolute', top: 10, right: 10, zIndex: 2 }}
+              aria-label="Close sync configuration"
+              title="Close"
+              onClick={() => setConfigModalOpen(false)}
+            >
+              {renderButtonIcon('close')}
+            </button>
+            <div style={{ padding: 12 }}>
+              <SyncCenterSurface
+                companyId={companyId}
+                scopeProjectId={projectId}
+                embeddedTitle="External Issue Sync"
+                modal
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }

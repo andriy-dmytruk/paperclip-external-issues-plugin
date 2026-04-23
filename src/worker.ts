@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Octokit } from '@octokit/rest';
-import { definePlugin, runWorker, type Issue, type IssueComment, type PluginLauncherRegistration, type ToolResult, type ToolRunContext } from '@paperclipai/plugin-sdk';
+import { definePlugin, runWorker, type Issue, type IssueComment, type ToolResult, type ToolRunContext } from '@paperclipai/plugin-sdk';
 import { ApiApi as JiraApiClient } from '../generated/jira-dc-client/9.12.0/apis/ApiApi.ts';
 import {
   Configuration as JiraApiConfiguration,
@@ -244,22 +244,6 @@ interface JiraCommentLinkData {
   lastSyncedAt: string;
 }
 
-const ENTITY_SYNC_LAUNCHER: PluginLauncherRegistration = {
-  id: 'paperclip-external-issues-plugin-entity-launcher',
-  displayName: 'Sync Issues',
-  description: 'Open the issue sync dialog for the current entity.',
-  placementZone: 'toolbarButton',
-  entityTypes: ['project'],
-  action: {
-    type: 'openModal',
-    target: 'JiraSyncLauncherModal'
-  },
-  render: {
-    environment: 'hostOverlay',
-    bounds: 'wide'
-  }
-};
-
 function normalizeOptionalString(value: unknown): string | undefined {
   if (typeof value !== 'string') {
     return undefined;
@@ -299,6 +283,43 @@ function normalizeAgentIssueProviderAccess(value: unknown): AgentIssueProviderAc
   return {
     enabled,
     allowedAgentIds: normalizeStringArray(record.allowedAgentIds)
+  };
+}
+
+async function buildProjectToolbarStateData(
+  ctx: PluginSetupContext,
+  companyId?: string,
+  projectId?: string
+): Promise<Record<string, unknown>> {
+  if (!companyId || !projectId) {
+    return {
+      configured: false,
+      syncFailed: false,
+      providerType: null,
+      providerName: null
+    };
+  }
+
+  const settingsData = await buildSettingsRegistrationData(ctx, companyId, projectId);
+  const providerId = normalizeOptionalString(settingsData.selectedProviderId);
+  const providerType = normalizeProviderType(settingsData.selectedProviderKey);
+  const providerName = Array.isArray(settingsData.providers)
+    ? (settingsData.providers as Array<Record<string, unknown>>).find((provider) => normalizeOptionalString(provider.providerId) === providerId)?.displayName
+    : undefined;
+  const syncStateRecord =
+    settingsData.syncState && typeof settingsData.syncState === 'object'
+      ? settingsData.syncState as Record<string, unknown>
+      : {};
+  const syncFailed = normalizeOptionalString(syncStateRecord.status) === 'error';
+  const configured = Boolean(providerId) && settingsData.configReady === true;
+
+  return {
+    configured,
+    syncFailed,
+    syncStatus: normalizeOptionalString(syncStateRecord.status) ?? 'idle',
+    providerType,
+    providerName: normalizeOptionalString(providerName),
+    projectId
   };
 }
 
@@ -5016,7 +5037,6 @@ function registerIssueProviderAgentTools(ctx: PluginSetupContext): void {
 
 const plugin = definePlugin({
   async setup(ctx) {
-    ctx.launchers.register(ENTITY_SYNC_LAUNCHER);
     registerIssueProviderAgentTools(ctx);
 
     ctx.data.register('sync.entryContext', async (input) => {
@@ -5045,6 +5065,13 @@ const plugin = definePlugin({
       const projectId = normalizeOptionalString(record.projectId);
       const issueId = normalizeOptionalString(record.issueId);
       return await buildSyncProjectPageData(ctx, companyId, projectId, issueId);
+    });
+
+    ctx.data.register('sync.projectToolbarState', async (input) => {
+      const record = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+      const companyId = normalizeCompanyId(record.companyId);
+      const projectId = normalizeOptionalString(record.projectId);
+      return await buildProjectToolbarStateData(ctx, companyId, projectId);
     });
 
     ctx.data.register('sync.providers', async (input) => {
