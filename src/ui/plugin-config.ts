@@ -14,7 +14,7 @@ export {
 } from '../providers/shared/config.ts';
 export type { ProviderType } from '../providers/shared/config.ts';
 
-const PLUGIN_ID = 'paperclip-jira-plugin';
+const PLUGIN_ID = 'paperclip-external-issues-plugin';
 
 export const JIRA_ISSUE_TYPE_OPTIONS = ['Task', 'Bug', 'Story', 'Epic', 'Sub-task'] as const;
 

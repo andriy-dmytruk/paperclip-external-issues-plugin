@@ -1,6 +1,6 @@
 # External Issues plugin specification
 
-External Issue Sync is a Paperclip plugin for synchronizing external issues into Paperclip projects while keeping Paperclip usable as the primary planning surface. The published npm package is `paperclip-external-issues-plugin`, while the Paperclip plugin id remains `paperclip-jira-plugin` for install and state compatibility.
+External Issue Sync is a Paperclip plugin for synchronizing external issues into Paperclip projects while keeping Paperclip usable as the primary planning surface. The published npm package and Paperclip plugin id are both `paperclip-external-issues-plugin`.
 
 ## MVP requirements
 

@@ -39,7 +39,7 @@ the same repo
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
 - **Stable Paperclip Plugin Identity**: Pass. The plan keeps
-  `paperclip-jira-plugin`, current capabilities, current slots, and existing
+  `paperclip-external-issues-plugin`, current capabilities, current slots, and existing
   durable link metadata stable while refactoring settings around project scope.
 - **Paperclip-Native Experience First**: Pass. The redesign keeps sync setup in
   hosted Paperclip launchers, settings, and issue detail surfaces rather than

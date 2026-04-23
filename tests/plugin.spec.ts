@@ -168,7 +168,7 @@ function makeAgent(overrides: Record<string, unknown> = {}) {
 }
 
 test('manifest keeps sync launchers on project and issue surfaces only', async () => {
-  assert.equal(manifest.id, 'paperclip-jira-plugin');
+  assert.equal(manifest.id, 'paperclip-external-issues-plugin');
   assert.equal(manifest.displayName, 'External Issue Sync');
   assert.ok(manifest.ui?.slots?.some((slot) => slot.type === 'settingsPage'));
   assert.ok((manifest.instanceConfigSchema as any)?.properties?.jiraToken);
@@ -177,7 +177,7 @@ test('manifest keeps sync launchers on project and issue surfaces only', async (
     ['jira', 'jira_dc', 'jira_cloud', 'github_issues']
   );
   assert.equal(manifest.ui?.launchers?.length, 1);
-  assert.equal(manifest.ui?.launchers?.[0]?.id, 'paperclip-jira-plugin-entity-launcher');
+  assert.equal(manifest.ui?.launchers?.[0]?.id, 'paperclip-external-issues-plugin-entity-launcher');
   assert.equal(manifest.ui?.launchers?.[0]?.placementZone, 'toolbarButton');
   assert.deepEqual(manifest.ui?.launchers?.[0]?.entityTypes, ['project']);
 });
@@ -1636,7 +1636,7 @@ test('sync.runNow imports Jira issues into mapped Paperclip projects', async () 
     assert.equal(syncState.status, 'success');
     assert.equal(syncState.importedCount, 1);
     assert.equal(importedIssues.length, 1);
-    assert.match(importedIssues[0]?.description ?? '', /paperclip-jira-plugin-upstream: GRB-461/);
+    assert.match(importedIssues[0]?.description ?? '', /paperclip-external-issues-plugin-upstream: GRB-461/);
     assert.equal(importedIssues[0]?.status, 'todo');
     assert.equal(providerDirectory.providers[0]?.status, 'connected');
     assert.equal(providerDirectory.providers[0]?.healthLabel, 'Connected');
@@ -1773,7 +1773,7 @@ test('sync.runNow recreates a hidden imported Jira issue when it reappears upstr
           id: 'issue-hidden-sync',
           projectId: 'project-1',
           title: '[GRB-461] Imported from Jira',
-          description: 'Remote body\n\n<!-- paperclip-jira-plugin-upstream: GRB-461 -->',
+          description: 'Remote body\n\n<!-- paperclip-external-issues-plugin-upstream: GRB-461 -->',
           hiddenAt: new Date('2026-04-21T00:00:00.000Z')
         })
       ]
@@ -1802,7 +1802,7 @@ test('sync.runNow recreates a hidden imported Jira issue when it reappears upstr
     });
 
     await harness.ctx.entities.upsert({
-      entityType: 'paperclip-jira-plugin.issue-link',
+      entityType: 'paperclip-external-issues-plugin.issue-link',
       scopeKind: 'issue',
       scopeId: 'issue-hidden-sync',
       externalId: 'GRB-461',
@@ -1838,7 +1838,7 @@ test('sync.runNow recreates a hidden imported Jira issue when it reappears upstr
     });
     const visibleReplacement = importedIssues.find((issue) => issue.id !== 'issue-hidden-sync' && issue.title === '[GRB-461] Imported from Jira');
     const issueLinks = await harness.ctx.entities.list({
-      entityType: 'paperclip-jira-plugin.issue-link',
+      entityType: 'paperclip-external-issues-plugin.issue-link',
       limit: 20
     });
     const newestLinkForKey = issueLinks
@@ -1902,7 +1902,7 @@ test('sync.runNow matches a scoped project even when an older mapping only saved
     });
 
     await harness.ctx.state.set(
-      { scopeKind: 'instance', stateKey: 'paperclip-jira-plugin-settings' },
+      { scopeKind: 'instance', stateKey: 'paperclip-external-issues-plugin-settings' },
       {
         mappings: [
           {
@@ -2506,13 +2506,13 @@ test('sync.runNow re-imports a Jira issue into a newly selected Paperclip projec
           id: 'issue-old-project',
           projectId: 'project-1',
           title: '[GRB-461] Imported from Jira',
-          description: '<!-- paperclip-jira-plugin-upstream: GRB-461 -->'
+          description: '<!-- paperclip-external-issues-plugin-upstream: GRB-461 -->'
         })
       ]
     });
 
     await harness.ctx.entities.upsert({
-      entityType: 'paperclip-jira-plugin.issue-link',
+      entityType: 'paperclip-external-issues-plugin.issue-link',
       scopeKind: 'issue',
       scopeId: 'issue-old-project',
       externalId: 'GRB-461',
@@ -3035,7 +3035,7 @@ test('issue.setUpstreamAssignee surfaces GitHub assignment validation failures',
         makeIssue({
           id: 'issue-1',
           title: '[ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1] Local Paperclip issue',
-          description: 'Local body\n\n<!-- paperclip-jira-plugin-upstream: ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1 -->'
+          description: 'Local body\n\n<!-- paperclip-external-issues-plugin-upstream: ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1 -->'
         })
       ]
     });
@@ -3058,7 +3058,7 @@ test('issue.setUpstreamAssignee surfaces GitHub assignment validation failures',
     });
 
     await harness.ctx.entities.upsert({
-      entityType: 'paperclip-jira-plugin.issue-link',
+      entityType: 'paperclip-external-issues-plugin.issue-link',
       scopeKind: 'issue',
       scopeId: 'issue-1',
       externalId: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1',
@@ -3391,7 +3391,7 @@ test('issue.setUpstreamStatus supports GitHub close reasons', async () => {
         makeIssue({
           id: 'issue-1',
           title: '[ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1] Local Paperclip issue',
-          description: 'Local body\n\n<!-- paperclip-jira-plugin-upstream: ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1 -->'
+          description: 'Local body\n\n<!-- paperclip-external-issues-plugin-upstream: ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1 -->'
         })
       ]
     });
@@ -3414,7 +3414,7 @@ test('issue.setUpstreamStatus supports GitHub close reasons', async () => {
     });
 
     await harness.ctx.entities.upsert({
-      entityType: 'paperclip-jira-plugin.issue-link',
+      entityType: 'paperclip-external-issues-plugin.issue-link',
       scopeKind: 'issue',
       scopeId: 'issue-1',
       externalId: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1',
@@ -3517,7 +3517,7 @@ test('issue sync presentation and upstream status action recover a missing link 
           id: 'issue-recover-link',
           projectId: 'project-1',
           title: '[GRB-318] Recovered sync issue',
-          description: 'Recovered body\n\n<!-- paperclip-jira-plugin-upstream: GRB-318 -->'
+          description: 'Recovered body\n\n<!-- paperclip-external-issues-plugin-upstream: GRB-318 -->'
         })
       ]
     });
@@ -3587,13 +3587,13 @@ test('issue sync presentation resolves the correct link when the host ignores en
         id: 'issue-1',
         projectId: 'project-1',
         title: '[GRB-161] First imported issue',
-        description: 'Body\n\n<!-- paperclip-jira-plugin-upstream: GRB-161 -->'
+        description: 'Body\n\n<!-- paperclip-external-issues-plugin-upstream: GRB-161 -->'
       }),
       makeIssue({
         id: 'issue-2',
         projectId: 'project-1',
         title: '[GRB-221] Second imported issue',
-        description: 'Body\n\n<!-- paperclip-jira-plugin-upstream: GRB-221 -->'
+        description: 'Body\n\n<!-- paperclip-external-issues-plugin-upstream: GRB-221 -->'
       })
     ]
   });
@@ -3613,7 +3613,7 @@ test('issue sync presentation resolves the correct link when the host ignores en
   });
 
   await harness.ctx.entities.upsert({
-    entityType: 'paperclip-jira-plugin.issue-link',
+    entityType: 'paperclip-external-issues-plugin.issue-link',
     scopeKind: 'issue',
     scopeId: 'issue-1',
     externalId: 'GRB-161:issue-1',
@@ -3634,7 +3634,7 @@ test('issue sync presentation resolves the correct link when the host ignores en
     }
   });
   await harness.ctx.entities.upsert({
-    entityType: 'paperclip-jira-plugin.issue-link',
+    entityType: 'paperclip-external-issues-plugin.issue-link',
     scopeKind: 'issue',
     scopeId: 'issue-2',
     externalId: 'GRB-221:issue-2',
@@ -3863,7 +3863,7 @@ test('issue.comment.submit always publishes synced issue comments to Jira', asyn
         makeIssue({
           id: 'issue-1',
           title: '[GRB-999] Local Paperclip issue',
-          description: 'Local body\n\n<!-- paperclip-jira-plugin-upstream: GRB-999 -->'
+          description: 'Local body\n\n<!-- paperclip-external-issues-plugin-upstream: GRB-999 -->'
         })
       ]
     });
@@ -3886,7 +3886,7 @@ test('issue.comment.submit always publishes synced issue comments to Jira', asyn
     });
 
     await harness.ctx.entities.upsert({
-      entityType: 'paperclip-jira-plugin.issue-link',
+      entityType: 'paperclip-external-issues-plugin.issue-link',
       scopeKind: 'issue',
       scopeId: 'issue-1',
       externalId: 'GRB-999',
@@ -3977,7 +3977,7 @@ test('issue.comment.submit preserves the local comment and surfaces GitHub permi
         makeIssue({
           id: 'issue-1',
           title: '[ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1] Local Paperclip issue',
-          description: 'Local body\n\n<!-- paperclip-jira-plugin-upstream: ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1 -->'
+          description: 'Local body\n\n<!-- paperclip-external-issues-plugin-upstream: ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1 -->'
         })
       ]
     });
@@ -4000,7 +4000,7 @@ test('issue.comment.submit preserves the local comment and surfaces GitHub permi
     });
 
     await harness.ctx.entities.upsert({
-      entityType: 'paperclip-jira-plugin.issue-link',
+      entityType: 'paperclip-external-issues-plugin.issue-link',
       scopeKind: 'issue',
       scopeId: 'issue-1',
       externalId: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1',
@@ -4104,7 +4104,7 @@ test('issue sync presentation loads GitHub upstream comments', async () => {
         makeIssue({
           id: 'issue-1',
           title: '[ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1] Local Paperclip issue',
-          description: 'Local body\n\n<!-- paperclip-jira-plugin-upstream: ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1 -->'
+          description: 'Local body\n\n<!-- paperclip-external-issues-plugin-upstream: ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1 -->'
         })
       ]
     });
@@ -4127,7 +4127,7 @@ test('issue sync presentation loads GitHub upstream comments', async () => {
     });
 
     await harness.ctx.entities.upsert({
-      entityType: 'paperclip-jira-plugin.issue-link',
+      entityType: 'paperclip-external-issues-plugin.issue-link',
       scopeKind: 'issue',
       scopeId: 'issue-1',
       externalId: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#1',
@@ -4289,7 +4289,7 @@ test('sync.findCleanupCandidates includes legacy untouched Jira imports across l
       makeIssue({
         id: 'issue-legacy-import',
         title: '[GRB-777] Legacy imported Jira issue',
-        description: 'Imported body\n\n<!-- paperclip-jira-plugin-upstream: GRB-777 -->',
+        description: 'Imported body\n\n<!-- paperclip-external-issues-plugin-upstream: GRB-777 -->',
         status: 'backlog'
       })
     ]
@@ -4309,7 +4309,7 @@ test('sync.findCleanupCandidates includes legacy untouched Jira imports across l
   });
 
   await harness.ctx.entities.upsert({
-    entityType: 'paperclip-jira-plugin.issue-link',
+    entityType: 'paperclip-external-issues-plugin.issue-link',
     scopeKind: 'issue',
     scopeId: 'issue-legacy-import',
     externalId: 'GRB-777',
@@ -4360,7 +4360,7 @@ test('sync.findCleanupCandidates ignores hidden imported issues', async () => {
       makeIssue({
         id: 'issue-hidden-import',
         title: '[GRB-778] Hidden imported Jira issue',
-        description: 'Imported body\n\n<!-- paperclip-jira-plugin-upstream: GRB-778 -->',
+        description: 'Imported body\n\n<!-- paperclip-external-issues-plugin-upstream: GRB-778 -->',
         hidden: true,
         status: 'backlog'
       })
@@ -4368,7 +4368,7 @@ test('sync.findCleanupCandidates ignores hidden imported issues', async () => {
   });
 
   await harness.ctx.entities.upsert({
-    entityType: 'paperclip-jira-plugin.issue-link',
+    entityType: 'paperclip-external-issues-plugin.issue-link',
     scopeKind: 'issue',
     scopeId: 'issue-hidden-import',
     externalId: 'GRB-778',
@@ -4417,7 +4417,7 @@ test('sync.cleanupImportedIssues accepts selected issues without mutating issue 
       makeIssue({
         id: 'issue-cleanup-import',
         title: '[GRB-779] Cleanup imported Jira issue',
-        description: 'Imported body\n\n<!-- paperclip-jira-plugin-upstream: GRB-779 -->',
+        description: 'Imported body\n\n<!-- paperclip-external-issues-plugin-upstream: GRB-779 -->',
         hiddenAt: null,
         status: 'backlog'
       })
@@ -4425,7 +4425,7 @@ test('sync.cleanupImportedIssues accepts selected issues without mutating issue 
   });
 
   await harness.ctx.entities.upsert({
-    entityType: 'paperclip-jira-plugin.issue-link',
+    entityType: 'paperclip-external-issues-plugin.issue-link',
     scopeKind: 'issue',
     scopeId: 'issue-cleanup-import',
     externalId: 'GRB-779',
@@ -4575,14 +4575,14 @@ test('sync.findCleanupCandidates still includes imported GitHub issues after loc
       makeIssue({
         id: 'issue-github-import',
         title: '[ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#2] Imported GitHub issue with local edits',
-        description: 'Locally tweaked body\n\n<!-- paperclip-jira-plugin-upstream: ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#2 -->',
+        description: 'Locally tweaked body\n\n<!-- paperclip-external-issues-plugin-upstream: ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#2 -->',
         status: 'in_progress'
       })
     ]
   });
 
   await harness.ctx.entities.upsert({
-    entityType: 'paperclip-jira-plugin.issue-link',
+    entityType: 'paperclip-external-issues-plugin.issue-link',
     scopeKind: 'issue',
     scopeId: 'issue-github-import',
     externalId: 'ANDRIY-DMYTRUK/ANDRIY-DMYTRUK.GITHUB.IO#2',
@@ -4611,7 +4611,7 @@ test('sync.findCleanupCandidates still includes imported GitHub issues after loc
   await harness.ctx.state.set({
     scopeKind: 'issue',
     scopeId: 'issue-github-import',
-    stateKey: 'paperclip-jira-plugin-comment-links'
+    stateKey: 'paperclip-external-issues-plugin-comment-links'
   }, {
     'comment-1': {
       commentId: 'comment-1',
@@ -4719,7 +4719,7 @@ test('issue sync presentation ignores stale Jira link metadata when the issue no
   });
 
   await harness.ctx.entities.upsert({
-    entityType: 'paperclip-jira-plugin.issue-link',
+    entityType: 'paperclip-external-issues-plugin.issue-link',
     scopeKind: 'issue',
     scopeId: 'issue-stale-link',
     externalId: 'GRB-461',

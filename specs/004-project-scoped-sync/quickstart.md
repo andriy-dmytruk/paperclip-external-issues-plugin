@@ -7,7 +7,7 @@ expands further.
 
 ## Prerequisites
 
-- Repo root: `/Users/andriy/IdeaProjects/paperclip-jira-plugin`
+- Repo root: `<repo-root>`
 - Local dependencies installed
 - A local Paperclip instance available for hosted UI verification when needed
 - At least one saved Jira provider definition or test Jira credentials
@@ -28,7 +28,7 @@ expands further.
 ## Verification Commands
 
 ```bash
-cd /Users/andriy/IdeaProjects/paperclip-jira-plugin
+cd <repo-root>
 pnpm typecheck
 pnpm test
 pnpm build

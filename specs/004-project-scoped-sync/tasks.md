@@ -17,7 +17,7 @@
 
 **Purpose**: Align docs and feature references before implementation starts
 
-- [ ] T001 Update feature context references for the new project-scoped sync rollout in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/AGENTS.md`, `/Users/andriy/IdeaProjects/paperclip-jira-plugin/README.md`, and `/Users/andriy/IdeaProjects/paperclip-jira-plugin/SPEC.md`
+- [ ] T001 Update feature context references for the new project-scoped sync rollout in `<repo-root>/AGENTS.md`, `<repo-root>/README.md`, and `<repo-root>/SPEC.md`
 
 ---
 
@@ -27,11 +27,11 @@
 
 **⚠️ CRITICAL**: No user story work should begin until this phase is complete
 
-- [ ] T002 Refactor worker settings types from company-scoped mappings to project-scoped configuration records in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/worker.ts`
-- [ ] T003 [P] Add shared project-scoped config and provider-selection helper types in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/plugin-config.ts`
-- [ ] T004 [P] Add project selection and project sync state helper utilities in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/project-bindings.ts`
-- [ ] T005 Extend worker data and action registrations to expose `sync.projects`, `sync.projectState`, `sync.project.save`, and `sync.project.refreshIdentity` in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/worker.ts`
-- [ ] T006 Update shared plugin contract coverage for the new project-scoped worker state shape in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/tests/plugin.spec.ts`
+- [ ] T002 Refactor worker settings types from company-scoped mappings to project-scoped configuration records in `<repo-root>/src/worker.ts`
+- [ ] T003 [P] Add shared project-scoped config and provider-selection helper types in `<repo-root>/src/ui/plugin-config.ts`
+- [ ] T004 [P] Add project selection and project sync state helper utilities in `<repo-root>/src/ui/project-bindings.ts`
+- [ ] T005 Extend worker data and action registrations to expose `sync.projects`, `sync.projectState`, `sync.project.save`, and `sync.project.refreshIdentity` in `<repo-root>/src/worker.ts`
+- [ ] T006 Update shared plugin contract coverage for the new project-scoped worker state shape in `<repo-root>/tests/plugin.spec.ts`
 
 **Checkpoint**: Project-scoped settings infrastructure is ready for user story implementation
 
@@ -43,10 +43,10 @@
 
 **Independent Test**: Open `Sync Issues` from a project and confirm the modal is already scoped to that project. Open it from the global launcher and confirm a project selector appears first.
 
-- [ ] T007 [P] [US1] Add test coverage for project-scoped launcher context and global project selection behavior in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/tests/plugin.spec.ts`
-- [ ] T008 [US1] Update launcher and popup state resolution to accept project context from global, project, and issue entry points in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/worker.ts`
-- [ ] T009 [US1] Refactor the sync modal state and project-selection flow for project-first rendering in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/index.tsx`
-- [ ] T010 [US1] Render empty-provider defaults for newly created Paperclip projects in the project-scoped sync UI in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/index.tsx`
+- [ ] T007 [P] [US1] Add test coverage for project-scoped launcher context and global project selection behavior in `<repo-root>/tests/plugin.spec.ts`
+- [ ] T008 [US1] Update launcher and popup state resolution to accept project context from global, project, and issue entry points in `<repo-root>/src/worker.ts`
+- [ ] T009 [US1] Refactor the sync modal state and project-selection flow for project-first rendering in `<repo-root>/src/ui/index.tsx`
+- [ ] T010 [US1] Render empty-provider defaults for newly created Paperclip projects in the project-scoped sync UI in `<repo-root>/src/ui/index.tsx`
 
 **Checkpoint**: User Story 1 is independently functional and testable
 
@@ -58,12 +58,12 @@
 
 **Independent Test**: Choose a provider for one project, confirm default assignee and default status populate correctly, save cadence and filters, and verify sync or hide actions affect only that project.
 
-- [ ] T011 [P] [US2] Add test coverage for project-scoped provider selection, upload defaults, and project-only sync state in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/tests/plugin.spec.ts`
-- [ ] T012 [US2] Implement project-scoped provider reference persistence, upload defaults, and filter defaults in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/worker.ts`
-- [ ] T013 [US2] Implement authenticated-user resolution for project default assignee with safe fallback behavior in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/worker.ts`
-- [ ] T014 [US2] Update the hosted sync UI to edit provider choice, default assignee, default status, cadence, and filters as one project configuration in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/index.tsx`
-- [ ] T015 [US2] Scope manual sync and hide-imported-issues actions to the selected project and return project-only progress in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/worker.ts`
-- [ ] T016 [US2] Update sync summaries and project-scoped action messaging in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/index.tsx`
+- [ ] T011 [P] [US2] Add test coverage for project-scoped provider selection, upload defaults, and project-only sync state in `<repo-root>/tests/plugin.spec.ts`
+- [ ] T012 [US2] Implement project-scoped provider reference persistence, upload defaults, and filter defaults in `<repo-root>/src/worker.ts`
+- [ ] T013 [US2] Implement authenticated-user resolution for project default assignee with safe fallback behavior in `<repo-root>/src/worker.ts`
+- [ ] T014 [US2] Update the hosted sync UI to edit provider choice, default assignee, default status, cadence, and filters as one project configuration in `<repo-root>/src/ui/index.tsx`
+- [ ] T015 [US2] Scope manual sync and hide-imported-issues actions to the selected project and return project-only progress in `<repo-root>/src/worker.ts`
+- [ ] T016 [US2] Update sync summaries and project-scoped action messaging in `<repo-root>/src/ui/index.tsx`
 
 **Checkpoint**: User Stories 1 and 2 both work independently, with project-scoped config and actions
 
@@ -75,10 +75,10 @@
 
 **Independent Test**: Open a synced issue and verify Jira status, assignee, and imported comments still appear. Open a local issue in a configured project and upload it to Jira.
 
-- [ ] T017 [P] [US3] Add issue-detail and upload-flow coverage for configured and unconfigured projects in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/tests/plugin.spec.ts`
-- [ ] T018 [US3] Update issue sync presentation to derive provider availability from project-scoped configuration without showing false upstream links in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/worker.ts`
-- [ ] T019 [US3] Update issue detail rendering and upload action availability for project-scoped provider settings in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/index.tsx`
-- [ ] T020 [US3] Route local issue upload through the selected project provider and preserve synced issue metadata plus imported comments behavior in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/worker.ts`
+- [ ] T017 [P] [US3] Add issue-detail and upload-flow coverage for configured and unconfigured projects in `<repo-root>/tests/plugin.spec.ts`
+- [ ] T018 [US3] Update issue sync presentation to derive provider availability from project-scoped configuration without showing false upstream links in `<repo-root>/src/worker.ts`
+- [ ] T019 [US3] Update issue detail rendering and upload action availability for project-scoped provider settings in `<repo-root>/src/ui/index.tsx`
+- [ ] T020 [US3] Route local issue upload through the selected project provider and preserve synced issue metadata plus imported comments behavior in `<repo-root>/src/worker.ts`
 
 **Checkpoint**: All user stories are independently functional
 
@@ -88,9 +88,9 @@
 
 **Purpose**: Finalize migration compatibility, documentation, and end-to-end verification
 
-- [ ] T021 Add compatibility handling for legacy mapping state migration into project-scoped settings in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/worker.ts`
-- [ ] T022 [P] Refresh user-facing documentation for the project-scoped sync model in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/README.md` and `/Users/andriy/IdeaProjects/paperclip-jira-plugin/SPEC.md`
-- [ ] T023 Run end-to-end verification commands for the feature from `/Users/andriy/IdeaProjects/paperclip-jira-plugin/package.json` using `pnpm typecheck`, `pnpm test`, and `pnpm build`
+- [ ] T021 Add compatibility handling for legacy mapping state migration into project-scoped settings in `<repo-root>/src/worker.ts`
+- [ ] T022 [P] Refresh user-facing documentation for the project-scoped sync model in `<repo-root>/README.md` and `<repo-root>/SPEC.md`
+- [ ] T023 Run end-to-end verification commands for the feature from `<repo-root>/package.json` using `pnpm typecheck`, `pnpm test`, and `pnpm build`
 
 ---
 
@@ -130,22 +130,22 @@
 ## Parallel Example: User Story 1
 
 ```bash
-Task: "Add test coverage for project-scoped launcher context and global project selection behavior in /Users/andriy/IdeaProjects/paperclip-jira-plugin/tests/plugin.spec.ts"
-Task: "Update launcher and popup state resolution to accept project context from global, project, and issue entry points in /Users/andriy/IdeaProjects/paperclip-jira-plugin/src/worker.ts"
+Task: "Add test coverage for project-scoped launcher context and global project selection behavior in <repo-root>/tests/plugin.spec.ts"
+Task: "Update launcher and popup state resolution to accept project context from global, project, and issue entry points in <repo-root>/src/worker.ts"
 ```
 
 ## Parallel Example: User Story 2
 
 ```bash
-Task: "Add test coverage for project-scoped provider selection, upload defaults, and project-only sync state in /Users/andriy/IdeaProjects/paperclip-jira-plugin/tests/plugin.spec.ts"
-Task: "Implement project-scoped provider reference persistence, upload defaults, and filter defaults in /Users/andriy/IdeaProjects/paperclip-jira-plugin/src/worker.ts"
+Task: "Add test coverage for project-scoped provider selection, upload defaults, and project-only sync state in <repo-root>/tests/plugin.spec.ts"
+Task: "Implement project-scoped provider reference persistence, upload defaults, and filter defaults in <repo-root>/src/worker.ts"
 ```
 
 ## Parallel Example: User Story 3
 
 ```bash
-Task: "Add issue-detail and upload-flow coverage for configured and unconfigured projects in /Users/andriy/IdeaProjects/paperclip-jira-plugin/tests/plugin.spec.ts"
-Task: "Update issue sync presentation to derive provider availability from project-scoped configuration without showing false upstream links in /Users/andriy/IdeaProjects/paperclip-jira-plugin/src/worker.ts"
+Task: "Add issue-detail and upload-flow coverage for configured and unconfigured projects in <repo-root>/tests/plugin.spec.ts"
+Task: "Update issue sync presentation to derive provider availability from project-scoped configuration without showing false upstream links in <repo-root>/src/worker.ts"
 ```
 
 ---

@@ -37,7 +37,7 @@ surfaces (`settingsPage`, `globalToolbarButton`, `toolbarButton`, `taskDetailVie
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-- **Stable Paperclip Plugin Identity**: Pass. The plan keeps `paperclip-jira-plugin`,
+- **Stable Paperclip Plugin Identity**: Pass. The plan keeps `paperclip-external-issues-plugin`,
   existing entrypoints, and durable state/entity identifiers stable while adding
   provider-aware data structures behind them.
 - **Paperclip-Native Experience First**: Pass. The redesign stays inside hosted

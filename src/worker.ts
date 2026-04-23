@@ -30,15 +30,15 @@ import { getIssueProviderAgentToolDeclaration } from './issue-provider-agent-too
 
 const SETTINGS_SCOPE = {
   scopeKind: 'instance' as const,
-  stateKey: 'paperclip-jira-plugin-settings'
+  stateKey: 'paperclip-external-issues-plugin-settings'
 };
 
-const ISSUE_LINK_ENTITY_TYPE = 'paperclip-jira-plugin.issue-link';
-const HIDDEN_ISSUE_MARKER_PREFIX = '<!-- paperclip-jira-plugin-upstream: ';
+const ISSUE_LINK_ENTITY_TYPE = 'paperclip-external-issues-plugin.issue-link';
+const HIDDEN_ISSUE_MARKER_PREFIX = '<!-- paperclip-external-issues-plugin-upstream: ';
 const HIDDEN_ISSUE_MARKER_SUFFIX = ' -->';
 const DEFAULT_SYNC_FREQUENCY_MINUTES = 15;
 const DEFAULT_ISSUE_TYPE = DEFAULT_JIRA_ISSUE_TYPE;
-const COMMENT_LINKS_STATE_KEY = 'paperclip-jira-plugin-comment-links';
+const COMMENT_LINKS_STATE_KEY = 'paperclip-external-issues-plugin-comment-links';
 const DEFAULT_PROVIDER_ID = 'provider-default-jira';
 const DEFAULT_CONNECTION_TEST_KEY = '__default__';
 const providerRegistry = createProviderRegistry();
@@ -245,7 +245,7 @@ interface JiraCommentLinkData {
 }
 
 const ENTITY_SYNC_LAUNCHER: PluginLauncherRegistration = {
-  id: 'paperclip-jira-plugin-entity-launcher',
+  id: 'paperclip-external-issues-plugin-entity-launcher',
   displayName: 'Sync Issues',
   description: 'Open the issue sync dialog for the current entity.',
   placementZone: 'toolbarButton',
@@ -2995,7 +2995,7 @@ function buildIssueMarker(jiraIssueKey: string): string {
 }
 
 function stripIssueMarker(description: string): string {
-  return description.replace(/<!-- paperclip-jira-plugin-upstream: [^>]+ -->/g, '').trim();
+  return description.replace(/<!-- paperclip-external-issues-plugin-upstream: [^>]+ -->/g, '').trim();
 }
 
 function ensureIssueMarker(description: string, jiraIssueKey: string): string {
@@ -3011,7 +3011,7 @@ function hasIssueMarker(description: string | null | undefined, jiraIssueKey?: s
 
   return jiraIssueKey
     ? description.includes(buildIssueMarker(jiraIssueKey))
-    : /<!-- paperclip-jira-plugin-upstream: [^>]+ -->/.test(description);
+    : /<!-- paperclip-external-issues-plugin-upstream: [^>]+ -->/.test(description);
 }
 
 function hashCommentBody(body: string): string {
@@ -3046,7 +3046,7 @@ function shouldPresentIssueLink(issue: Issue, link: JiraIssueLinkData | null): l
 }
 
 function extractUpstreamIssueKey(issue: Issue): string | null {
-  const markerMatch = issue.description?.match(/<!-- paperclip-jira-plugin-upstream: ([^ >]+) -->/i);
+  const markerMatch = issue.description?.match(/<!-- paperclip-external-issues-plugin-upstream: ([^ >]+) -->/i);
   if (markerMatch?.[1]) {
     return markerMatch[1].trim().toUpperCase();
   }
@@ -5535,7 +5535,7 @@ const plugin = definePlugin({
       return await submitIssueComment(ctx, companyId, issueId, body);
     });
 
-    ctx.jobs.register('sync.jira-issues', async (job) => {
+    ctx.jobs.register('sync.external-issues', async (job) => {
       const settings = normalizeSettings(await ctx.state.get(SETTINGS_SCOPE));
       const projectConfigs = settings.projectConfigs ?? [];
       for (const projectConfig of projectConfigs) {

@@ -3,7 +3,7 @@
 **Input**: Design documents from `/specs/005-project-sync-ux/`  
 **Prerequisites**: `plan.md`, `spec.md`, `research.md`, `data-model.md`, `contracts/project-first-sync-ui.md`
 
-**Tests**: Cross-cutting verification should be updated in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/tests/plugin.spec.ts`, with full validation through `pnpm typecheck`, `pnpm test`, and `pnpm build`.
+**Tests**: Cross-cutting verification should be updated in `<repo-root>/tests/plugin.spec.ts`, with full validation through `pnpm typecheck`, `pnpm test`, and `pnpm build`.
 
 **Organization**: Tasks are grouped by user story to enable independent implementation and testing of each story.
 
@@ -17,8 +17,8 @@
 
 **Purpose**: Prepare shared UI helpers for page-oriented sync navigation and provider management
 
-- [X] T001 [P] Add reusable provider-type and provider-page helper types in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/plugin-config.ts`
-- [X] T002 [P] Add project-first sync navigation helpers for entry context and page routing in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/project-bindings.ts`
+- [X] T001 [P] Add reusable provider-type and provider-page helper types in `<repo-root>/src/ui/plugin-config.ts`
+- [X] T002 [P] Add project-first sync navigation helpers for entry context and page routing in `<repo-root>/src/ui/project-bindings.ts`
 
 ---
 
@@ -28,11 +28,11 @@
 
 **⚠️ CRITICAL**: No user story work should begin until this phase is complete
 
-- [X] T003 [P] Rework launcher metadata so project and issue sync entry points are primary in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/manifest.ts`
-- [X] T004 Refactor runtime launcher context and page-state contracts for project picker, project page, and provider pages in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/worker.ts`
-- [X] T005 [P] Extend provider summary and provider detail helper logic for dedicated provider pages in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/plugin-config.ts`
-- [X] T006 [P] Add worker payload builders for `sync.entryContext`, `sync.projectList`, `sync.projectPage`, `settings.providerDirectory`, and `settings.providerDetail` in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/worker.ts`
-- [X] T007 Refactor the hosted sync shell to support page-level navigation between project picker, project page, and provider pages in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/index.tsx`
+- [X] T003 [P] Rework launcher metadata so project and issue sync entry points are primary in `<repo-root>/src/manifest.ts`
+- [X] T004 Refactor runtime launcher context and page-state contracts for project picker, project page, and provider pages in `<repo-root>/src/worker.ts`
+- [X] T005 [P] Extend provider summary and provider detail helper logic for dedicated provider pages in `<repo-root>/src/ui/plugin-config.ts`
+- [X] T006 [P] Add worker payload builders for `sync.entryContext`, `sync.projectList`, `sync.projectPage`, `settings.providerDirectory`, and `settings.providerDetail` in `<repo-root>/src/worker.ts`
+- [X] T007 Refactor the hosted sync shell to support page-level navigation between project picker, project page, and provider pages in `<repo-root>/src/ui/index.tsx`
 
 **Checkpoint**: Shared project-first sync infrastructure is ready for story delivery
 
@@ -44,10 +44,10 @@
 
 **Independent Test**: Open a project and confirm `Sync Issues` is available in that project context. Open an issue and confirm `Sync Issues` appears alongside the other issue actions without relying on the global top-of-window button.
 
-- [X] T008 [US1] Update project and issue sync entry rendering to open the project-first flow in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/index.tsx`
-- [X] T009 [US1] Implement the global sync start screen so it shows only project selection before project settings in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/index.tsx`
-- [X] T010 [P] [US1] Persist selected entry context and route chosen projects into dedicated project pages in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/worker.ts`
-- [X] T011 [P] [US1] Render the dedicated project page header, project context summary, and back navigation in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/index.tsx`
+- [X] T008 [US1] Update project and issue sync entry rendering to open the project-first flow in `<repo-root>/src/ui/index.tsx`
+- [X] T009 [US1] Implement the global sync start screen so it shows only project selection before project settings in `<repo-root>/src/ui/index.tsx`
+- [X] T010 [P] [US1] Persist selected entry context and route chosen projects into dedicated project pages in `<repo-root>/src/worker.ts`
+- [X] T011 [P] [US1] Render the dedicated project page header, project context summary, and back navigation in `<repo-root>/src/ui/index.tsx`
 
 **Checkpoint**: User Story 1 is independently functional and testable
 
@@ -59,11 +59,11 @@
 
 **Independent Test**: Open plugin settings, go to the providers page, create or edit a provider from a dedicated provider page, then open one project's sync page and confirm only `Hide imported issues` is available before a provider is selected.
 
-- [X] T012 [P] [US2] Implement provider directory and provider detail state persistence with provider-type selector support in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/worker.ts`
-- [X] T013 [P] [US2] Build the dedicated providers settings page and provider detail page with `Back` navigation in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/index.tsx`
-- [X] T014 [US2] Enforce provider-gated disclosure so only provider selection and `Hide imported issues` appear before provider choice in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/index.tsx`
-- [X] T015 [US2] Preserve provider-cleared project state and `Hide imported issues` availability in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/worker.ts`
-- [X] T016 [US2] Render selected-provider project settings, save actions, and provider summary inside the dedicated project page in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/index.tsx`
+- [X] T012 [P] [US2] Implement provider directory and provider detail state persistence with provider-type selector support in `<repo-root>/src/worker.ts`
+- [X] T013 [P] [US2] Build the dedicated providers settings page and provider detail page with `Back` navigation in `<repo-root>/src/ui/index.tsx`
+- [X] T014 [US2] Enforce provider-gated disclosure so only provider selection and `Hide imported issues` appear before provider choice in `<repo-root>/src/ui/index.tsx`
+- [X] T015 [US2] Preserve provider-cleared project state and `Hide imported issues` availability in `<repo-root>/src/worker.ts`
+- [X] T016 [US2] Render selected-provider project settings, save actions, and provider summary inside the dedicated project page in `<repo-root>/src/ui/index.tsx`
 
 **Checkpoint**: User Stories 1 and 2 both work independently, with clear provider and project separation
 
@@ -75,11 +75,11 @@
 
 **Independent Test**: Open a synced issue in dark mode, confirm the buttons and panels match the host styling expectations, verify imported comments are visually distinct, and add a new comment using the standard comment field with a `Publish to upstream` option.
 
-- [X] T017 [P] [US3] Adjust synced issue action and status panel styling for Paperclip dark mode in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/index.tsx`
-- [X] T018 [P] [US3] Extend comment sync presentation metadata for imported-comment styling and publish intent in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/worker.ts`
-- [X] T019 [US3] Render imported comment provenance styling and badges in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/index.tsx`
-- [X] T020 [US3] Extend the standard synced-issue comment composer with a `Publish to upstream` control in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/index.tsx`
-- [X] T021 [US3] Handle local-only versus upstream-publish comment submission in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/src/worker.ts`
+- [X] T017 [P] [US3] Adjust synced issue action and status panel styling for Paperclip dark mode in `<repo-root>/src/ui/index.tsx`
+- [X] T018 [P] [US3] Extend comment sync presentation metadata for imported-comment styling and publish intent in `<repo-root>/src/worker.ts`
+- [X] T019 [US3] Render imported comment provenance styling and badges in `<repo-root>/src/ui/index.tsx`
+- [X] T020 [US3] Extend the standard synced-issue comment composer with a `Publish to upstream` control in `<repo-root>/src/ui/index.tsx`
+- [X] T021 [US3] Handle local-only versus upstream-publish comment submission in `<repo-root>/src/worker.ts`
 
 **Checkpoint**: All user stories are independently functional
 
@@ -89,9 +89,9 @@
 
 **Purpose**: Finish verification, docs, and reusable contract coverage
 
-- [X] T022 [P] Refresh user-facing behavior docs for project-first sync navigation, provider pages, dark-mode styling, and comment publishing in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/README.md` and `/Users/andriy/IdeaProjects/paperclip-jira-plugin/SPEC.md`
-- [X] T023 [P] Update project-first navigation, provider-page, and comment-publish contract coverage in `/Users/andriy/IdeaProjects/paperclip-jira-plugin/tests/plugin.spec.ts`
-- [X] T024 Run `pnpm typecheck`, `pnpm test`, and `pnpm build` from `/Users/andriy/IdeaProjects/paperclip-jira-plugin/package.json`
+- [X] T022 [P] Refresh user-facing behavior docs for project-first sync navigation, provider pages, dark-mode styling, and comment publishing in `<repo-root>/README.md` and `<repo-root>/SPEC.md`
+- [X] T023 [P] Update project-first navigation, provider-page, and comment-publish contract coverage in `<repo-root>/tests/plugin.spec.ts`
+- [X] T024 Run `pnpm typecheck`, `pnpm test`, and `pnpm build` from `<repo-root>/package.json`
 
 ---
 
@@ -132,22 +132,22 @@
 ## Parallel Example: User Story 1
 
 ```bash
-Task: "Persist selected entry context and route chosen projects into dedicated project pages in /Users/andriy/IdeaProjects/paperclip-jira-plugin/src/worker.ts"
-Task: "Render the dedicated project page header, project context summary, and back navigation in /Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/index.tsx"
+Task: "Persist selected entry context and route chosen projects into dedicated project pages in <repo-root>/src/worker.ts"
+Task: "Render the dedicated project page header, project context summary, and back navigation in <repo-root>/src/ui/index.tsx"
 ```
 
 ## Parallel Example: User Story 2
 
 ```bash
-Task: "Implement provider directory and provider detail state persistence with provider-type selector support in /Users/andriy/IdeaProjects/paperclip-jira-plugin/src/worker.ts"
-Task: "Build the dedicated providers settings page and provider detail page with Back navigation in /Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/index.tsx"
+Task: "Implement provider directory and provider detail state persistence with provider-type selector support in <repo-root>/src/worker.ts"
+Task: "Build the dedicated providers settings page and provider detail page with Back navigation in <repo-root>/src/ui/index.tsx"
 ```
 
 ## Parallel Example: User Story 3
 
 ```bash
-Task: "Adjust synced issue action and status panel styling for Paperclip dark mode in /Users/andriy/IdeaProjects/paperclip-jira-plugin/src/ui/index.tsx"
-Task: "Extend comment sync presentation metadata for imported-comment styling and publish intent in /Users/andriy/IdeaProjects/paperclip-jira-plugin/src/worker.ts"
+Task: "Adjust synced issue action and status panel styling for Paperclip dark mode in <repo-root>/src/ui/index.tsx"
+Task: "Extend comment sync presentation metadata for imported-comment styling and publish intent in <repo-root>/src/worker.ts"
 ```
 
 ---

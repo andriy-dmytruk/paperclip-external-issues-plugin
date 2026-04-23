@@ -14,7 +14,7 @@ const MANIFEST_VERSION =
   || '0.0.0-dev';
 
 export const manifest: PaperclipPluginManifestV1 = {
-  id: 'paperclip-jira-plugin',
+  id: 'paperclip-external-issues-plugin',
   apiVersion: 1,
   version: MANIFEST_VERSION,
   displayName: 'External Issue Sync',
@@ -90,8 +90,8 @@ export const manifest: PaperclipPluginManifestV1 = {
   },
   jobs: [
     {
-      jobKey: 'sync.jira-issues',
-      displayName: 'Sync Jira issues',
+      jobKey: 'sync.external-issues',
+      displayName: 'Sync external issues',
       description: 'Checks for Jira updates and imports/syncs issues on the configured cadence.',
       schedule: SCHEDULE_TICK_CRON
     }
@@ -105,34 +105,34 @@ export const manifest: PaperclipPluginManifestV1 = {
     slots: [
       {
         type: 'dashboardWidget',
-        id: 'paperclip-jira-plugin-dashboard-widget',
+        id: 'paperclip-external-issues-plugin-dashboard-widget',
         displayName: 'External Issue Sync',
         exportName: 'JiraSyncDashboardWidget'
       },
       {
         type: 'taskDetailView',
-        id: 'paperclip-jira-plugin-task-detail-view',
+        id: 'paperclip-external-issues-plugin-task-detail-view',
         displayName: 'External Issue Sync',
         exportName: 'JiraSyncIssueTaskDetailView',
         entityTypes: ['issue']
       },
       {
         type: 'commentAnnotation',
-        id: 'paperclip-jira-plugin-comment-annotation',
+        id: 'paperclip-external-issues-plugin-comment-annotation',
         displayName: 'External Issue Comment Sync',
         exportName: 'JiraSyncCommentAnnotation',
         entityTypes: ['comment']
       },
       {
         type: 'settingsPage',
-        id: 'paperclip-jira-plugin-settings-page',
+        id: 'paperclip-external-issues-plugin-settings-page',
         displayName: 'External Issue Sync',
         exportName: 'JiraSyncSettingsPage'
       }
     ],
     launchers: [
       {
-        id: 'paperclip-jira-plugin-entity-launcher',
+        id: 'paperclip-external-issues-plugin-entity-launcher',
         displayName: 'External Issue Sync',
         placementZone: 'toolbarButton',
         entityTypes: ['project'],

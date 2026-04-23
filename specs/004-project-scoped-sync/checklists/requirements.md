@@ -2,7 +2,7 @@
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning  
 **Created**: 2026-04-21  
-**Feature**: [spec.md](/Users/andriy/IdeaProjects/paperclip-jira-plugin/specs/004-project-scoped-sync/spec.md)
+**Feature**: [spec.md](<repo-root>/specs/004-project-scoped-sync/spec.md)
 
 ## Content Quality
 

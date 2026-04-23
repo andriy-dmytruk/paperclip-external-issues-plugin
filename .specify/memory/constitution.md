@@ -1,4 +1,4 @@
-# paperclip-jira-plugin Constitution
+# paperclip-external-issues-plugin Constitution
 
 ## Core Principles
 
