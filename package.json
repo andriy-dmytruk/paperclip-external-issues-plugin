@@ -55,7 +55,7 @@
     "jira:sync-spec": "node --import tsx ./scripts/jira-dc/sync-spec.ts",
     "jira:generate-client": "node --import tsx ./scripts/jira-dc/generate-client.ts",
     "prepack": "pnpm build",
-    "test": "node --test tests/build-script.spec.mjs && tsx --test tests/plugin.spec.ts tests/jira-wadl.spec.ts",
+    "test": "node --test tests/build-script.spec.mjs && tsx --test tests/plugin.spec.ts tests/jira-wadl.spec.ts tests/sync/*.spec.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

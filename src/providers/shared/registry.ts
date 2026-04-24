@@ -1,46 +1,60 @@
 import type { ProviderConfig } from './config.ts';
 import type {
-  CanonicalUpstreamComment,
-  CanonicalUpstreamIssue,
-  CanonicalUpstreamProject,
-  CanonicalUpstreamStatus,
-  CanonicalUpstreamUser,
-  ProviderCapabilities,
   ProviderConnectionResult,
+  ProviderCapabilities,
   ProviderErrorShape,
   ProviderType
 } from './types.ts';
+import type { ProjectSyncMapping, StatusMappingRule } from '../../worker/core/models.ts';
 
-export interface SyncProviderAdapter<TConfig extends ProviderConfig = ProviderConfig> {
+export interface DefaultProjectMappingsInput {
+  companyId: string;
+  projectId?: string;
+  projectName: string;
+}
+
+export interface BoundSyncProvider {
+  readonly capabilities: ProviderCapabilities;
+  readonly label: string;
+  testConnection?(): Promise<ProviderConnectionResult>;
+  getDefaultProjectMappings?(input: DefaultProjectMappingsInput): Promise<ProjectSyncMapping[]>;
+  searchUsers?(query: string): Promise<unknown[]>;
+  listUpstreamProjects?(query?: string): Promise<unknown[]>;
+  resolveCurrentUser?(): Promise<unknown | undefined>;
+  searchIssues?(
+    mapping: unknown,
+    options?: { issueKey?: string; filters?: unknown }
+  ): Promise<unknown[]>;
+  createIssue?(mapping: unknown, issue: unknown): Promise<unknown>;
+  updateIssue?(issueKey: string, issue: unknown): Promise<void>;
+  syncStatusFromPaperclip?(issueKey: string, status: string): Promise<boolean>;
+  listTransitions?(issueKey: string): Promise<Array<{ id: string; name: string }>>;
+  transitionIssue?(issueKey: string, transitionId: string): Promise<void>;
+  setAssignee?(issueKey: string, assignee: unknown): Promise<void>;
+  addComment?(issueKey: string, body: string): Promise<{ id: string }>;
+}
+
+export interface SyncProviderAdapter<
+  TStoredConfig extends ProviderConfig = ProviderConfig,
+  TRuntimeConfig = unknown,
+  TContext = unknown
+> {
   readonly type: ProviderType;
   readonly label: string;
   readonly capabilities: ProviderCapabilities;
-  validateConfig(config: TConfig): ProviderErrorShape | null;
-  testConnection?(context: unknown, config: TConfig): Promise<ProviderConnectionResult>;
-  listUpstreamProjects?(context: unknown, config: TConfig, query?: string): Promise<CanonicalUpstreamProject[]>;
-  searchUsers?(context: unknown, config: TConfig, query: string): Promise<CanonicalUpstreamUser[]>;
-  listAssignableUsers?(context: unknown, config: TConfig, issueOrProjectKey?: string): Promise<CanonicalUpstreamUser[]>;
-  listStatuses?(context: unknown, config: TConfig, issueKey?: string): Promise<CanonicalUpstreamStatus[]>;
-  getIssue?(context: unknown, config: TConfig, issueKey: string): Promise<CanonicalUpstreamIssue | null>;
-  listComments?(context: unknown, config: TConfig, issueKey: string): Promise<CanonicalUpstreamComment[]>;
-  runProjectSync?(context: unknown, config: TConfig, mapping: unknown, options?: Record<string, unknown>): Promise<unknown>;
-  createUpstreamIssue?(context: unknown, config: TConfig, mapping: unknown, localIssue: unknown): Promise<CanonicalUpstreamIssue>;
-  updateUpstreamIssue?(context: unknown, config: TConfig, issueKey: string, localIssue: unknown): Promise<void>;
-  updateUpstreamStatus?(context: unknown, config: TConfig, issueKey: string, statusIdOrName: string): Promise<void>;
-  updateUpstreamAssignee?(context: unknown, config: TConfig, issueKey: string, assignee: CanonicalUpstreamUser): Promise<void>;
-  postComment?(context: unknown, config: TConfig, issueKey: string, body: string): Promise<{ id: string }>;
-  toCanonicalIssue?(value: unknown, config: TConfig): CanonicalUpstreamIssue | null;
-  toCanonicalComment?(value: unknown): CanonicalUpstreamComment | null;
+  validateConfig(config: TStoredConfig): ProviderErrorShape | null;
+  getDefaultStatusMappings?(): StatusMappingRule[];
+  createProvider(context: TContext, config: TRuntimeConfig): BoundSyncProvider;
 }
 
-export class ProviderRegistry {
-  private readonly adapters = new Map<ProviderType, SyncProviderAdapter>();
+export class ProviderRegistry<TContext = unknown> {
+  private readonly adapters = new Map<ProviderType, SyncProviderAdapter<any, any, TContext>>();
 
-  register(adapter: SyncProviderAdapter): void {
+  register(adapter: SyncProviderAdapter<any, any, TContext>): void {
     this.adapters.set(adapter.type, adapter);
   }
 
-  get(type: ProviderType): SyncProviderAdapter {
+  get(type: ProviderType): SyncProviderAdapter<any, any, TContext> {
     const adapter = this.adapters.get(type);
     if (!adapter) {
       throw new Error(`No provider adapter registered for ${type}.`);
@@ -48,7 +62,7 @@ export class ProviderRegistry {
     return adapter;
   }
 
-  list(): SyncProviderAdapter[] {
+  list(): Array<SyncProviderAdapter<any, any, TContext>> {
     return [...this.adapters.values()];
   }
 }

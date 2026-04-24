@@ -107,5 +107,5 @@ Update the matching global skills when any of these change:
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read
-`specs/005-project-sync-ux/plan.md`.
+`specs/006-issue-sync-refactor/plan.md`.
 <!-- SPECKIT END -->

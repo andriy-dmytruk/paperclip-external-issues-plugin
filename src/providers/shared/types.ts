@@ -8,6 +8,7 @@ export interface ProviderCapabilities {
   supportsUserSearch: boolean;
   supportsAssignableUsers: boolean;
   supportsIssueCreation: boolean;
+  supportsIssueUpdate: boolean;
   supportsComments: boolean;
   supportsStatusUpdates: boolean;
   supportsBackgroundSync: boolean;

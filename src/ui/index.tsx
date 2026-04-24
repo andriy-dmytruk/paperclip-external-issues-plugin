@@ -21,8 +21,7 @@ import {
   isGitHubProviderType,
   isJiraProviderType,
   normalizeProviderConfig,
-  normalizeProviderType,
-  serializeProviderConfigForHost
+  normalizeProviderType
 } from '../providers/shared/config.ts';
 import {
   formatJiraUserLabel,
@@ -36,6 +35,9 @@ import {
   type SyncEntryContext,
   type SyncPageId
 } from './project-bindings.js';
+import { ProviderDetailSection, ProviderDirectorySection } from './features/provider-config/provider-pages.js';
+import { ProjectProviderSelectionSection } from './features/project-config/provider-selection-section.js';
+import { ProjectSyncActionsSection, ProviderDisabledCleanupSection } from './features/sync/sync-action-sections.js';
 
 type MappingRow = {
   id: string;
@@ -94,129 +96,6 @@ type ConnectionTestState = {
   message?: string;
   checkedAt?: string;
 };
-
-type PopupState = {
-  entryContext?: SyncEntryContext | null;
-  currentPage?: SyncPageId;
-  selectedProjectId?: string | null;
-  selectedProjectName?: string | null;
-  selectedProviderId?: string | null;
-  selectedProviderKey?: string | null;
-  defaultAssignee?: JiraUserReference | null;
-  defaultStatus?: string;
-  defaultStatusAssigneeAgentId?: string | null;
-  mappings: Array<{
-    id: string;
-    providerId?: string;
-    enabled?: boolean;
-    jiraProjectKey: string;
-    jiraJql?: string;
-    paperclipProjectId?: string;
-    paperclipProjectName: string;
-    filters?: TaskFilters;
-  }>;
-  availableProjects: Array<{
-    id: string;
-    name: string;
-    providerId?: string | null;
-    providerDisplayName?: string | null;
-    isConfigured?: boolean;
-  }>;
-  providers: Array<{
-    providerId: string;
-    providerKey: ProviderType;
-    displayName: string;
-    status: string;
-    healthLabel?: string;
-    healthMessage?: string;
-    configSummary?: string;
-    supportsConnectionTest?: boolean;
-    defaultIssueType?: string;
-    tokenSaved?: boolean;
-  }>;
-  providerTypeOptions?: Array<{
-    value: ProviderType;
-    label: string;
-  }>;
-  providerConfig?: {
-    providerId?: string | null;
-    providerKey?: ProviderType | null;
-    providerName?: string;
-    jiraBaseUrl?: string;
-    jiraUserEmail?: string;
-    defaultIssueType?: string;
-    tokenSaved?: boolean;
-  } | null;
-  projectPage?: {
-    projectId: string;
-    projectName: string;
-    selectedProviderId?: string | null;
-    agentIssueProviderAccess?: AgentIssueProviderAccess;
-    showProviderSelection?: boolean;
-    showHideImported?: boolean;
-    showProjectSettings?: boolean;
-    showSyncActions?: boolean;
-    navigationContext?: {
-      surface?: 'global' | 'project' | 'issue';
-      requiresProjectSelection?: boolean;
-    };
-  } | null;
-  providerDirectory?: {
-    providers: Array<{
-      providerId: string;
-      providerType: ProviderType;
-      displayName: string;
-      status?: string;
-      healthLabel?: string;
-      healthMessage?: string;
-      configSummary?: string;
-      tokenSaved?: boolean;
-    }>;
-    availableProviderTypes?: Array<{
-      value: ProviderType;
-      label: string;
-    }>;
-  } | null;
-  scheduleFrequencyMinutes?: number;
-  syncProgress: SyncProgressState;
-  connectionTest: ConnectionTestState;
-  configReady: boolean;
-  configMessage: string;
-  projectConfig?: {
-    projectId: string;
-    projectName: string;
-    providerId?: string | null;
-    agentIssueProviderAccess?: AgentIssueProviderAccess;
-    defaultAssignee?: JiraUserReference | null;
-    defaultStatus?: string;
-    defaultStatusAssigneeAgentId?: string | null;
-    statusMappings?: StatusMappingRow[];
-    scheduleFrequencyMinutes?: number;
-    mappings?: Array<{
-      id: string;
-      providerId?: string;
-      enabled?: boolean;
-      jiraProjectKey: string;
-      jiraJql?: string;
-      paperclipProjectId?: string;
-      paperclipProjectName: string;
-      filters?: TaskFilters;
-    }>;
-    suggestedUpstreamProjectKeys?: Partial<Record<ProviderType, string>>;
-  } | null;
-};
-
-type ProvidersData = {
-  providers: Array<{
-    providerId: string;
-    providerKey: ProviderType;
-    displayName: string;
-    status: string;
-    configSummary?: string;
-    supportsConnectionTest?: boolean;
-  }>;
-};
-
 type ProjectToolbarState = {
   configured: boolean;
   syncFailed?: boolean;
@@ -229,6 +108,10 @@ type ProjectToolbarState = {
 type IssueSyncPresentation = {
   visible: boolean;
   isSynced: boolean;
+  supportsIssueUpdate?: boolean;
+  supportsStatusUpdates?: boolean;
+  supportsAssignableUsers?: boolean;
+  supportsComments?: boolean;
   providerKey?: string;
   upstreamProviderId?: string | null;
   issueId?: string;
@@ -296,6 +179,7 @@ type CleanupCandidate = {
 
 type JiraUserSearchData = {
   suggestions: JiraUserReference[];
+  errorMessage?: string;
 };
 
 type UpstreamProjectSuggestion = {
@@ -307,6 +191,7 @@ type UpstreamProjectSuggestion = {
 
 type UpstreamProjectSearchData = {
   suggestions: UpstreamProjectSuggestion[];
+  errorMessage?: string;
 };
 
 function cardStyle(): React.CSSProperties {
@@ -892,19 +777,14 @@ export function buildCommentOriginLabel(
   return 'Local Paperclip comment';
 }
 
-function hasLegacyProviderConfig(config: JiraPluginConfig): boolean {
-  return Boolean(
-    config.jiraBaseUrl
-    || config.jiraUserEmail
-    || config.jiraToken
-    || config.jiraTokenRef
-    || config.defaultIssueType
-  );
-}
-
 function buildConfiguredProviders(config: JiraPluginConfig): JiraProviderConfig[] {
-  if (Array.isArray(config.providers) && config.providers.length > 0) {
-    return config.providers
+  const merged = [
+    ...(Array.isArray(config.jiraDcProviders) ? config.jiraDcProviders : []),
+    ...(Array.isArray(config.jiraCloudProviders) ? config.jiraCloudProviders : []),
+    ...(Array.isArray(config.githubProviders) ? config.githubProviders : [])
+  ];
+  if (merged.length > 0) {
+    return merged
       .map((provider, index) => normalizeProviderConfig({
         ...provider,
         id: provider.id || `provider-${index + 1}`,
@@ -912,21 +792,15 @@ function buildConfiguredProviders(config: JiraPluginConfig): JiraProviderConfig[
       }, index))
       .filter((provider): provider is JiraProviderConfig => provider !== null);
   }
+  return [];
+}
 
-  if (!hasLegacyProviderConfig(config)) {
-    return [];
-  }
-
-  return [{
-    id: 'provider-default-jira',
-    type: 'jira_dc',
-    name: 'Default Jira',
-    jiraBaseUrl: config.jiraBaseUrl,
-    jiraUserEmail: config.jiraUserEmail,
-    jiraToken: config.jiraToken,
-    jiraTokenRef: config.jiraTokenRef,
-    defaultIssueType: config.defaultIssueType || DEFAULT_JIRA_ISSUE_TYPE
-  }];
+function splitProviderConfigCollections(providers: JiraProviderConfig[]): Pick<JiraPluginConfig, 'jiraDcProviders' | 'jiraCloudProviders' | 'githubProviders'> {
+  return {
+    jiraDcProviders: providers.filter((provider) => provider.type === 'jira_dc'),
+    jiraCloudProviders: providers.filter((provider) => provider.type === 'jira_cloud'),
+    githubProviders: providers.filter((provider) => provider.type === 'github_issues')
+  };
 }
 
 function createProviderId(): string {
@@ -1186,6 +1060,7 @@ function JiraUserAutocomplete(props: {
   }, [props.value]);
 
   const suggestions = search.data?.suggestions ?? [];
+  const searchError = search.data?.errorMessage;
   const canSearch = Boolean(props.providerId && debouncedQuery.trim().length > 0 && !props.disabled);
 
   return (
@@ -1245,6 +1120,8 @@ function JiraUserAutocomplete(props: {
         >
           {search.loading ? (
             <div style={{ fontSize: 12, opacity: 0.72 }}>Searching users…</div>
+          ) : searchError ? (
+            <div style={{ fontSize: 12, color: 'var(--danger, #b91c1c)' }}>{searchError}</div>
           ) : suggestions.length > 0 ? suggestions.map((suggestion) => (
             <button
               key={suggestion.accountId}
@@ -1308,6 +1185,7 @@ function UpstreamProjectAutocomplete(props: {
   }, [props.value]);
 
   const suggestions = search.data?.suggestions ?? [];
+  const searchError = search.data?.errorMessage;
   const canSearch = Boolean(props.providerId && !props.disabled);
 
   return (
@@ -1356,6 +1234,8 @@ function UpstreamProjectAutocomplete(props: {
             <div style={{ fontSize: 12, opacity: 0.72 }}>
               {`Searching ${getProviderMappingSummaryNoun(props.providerType)}s…`}
             </div>
+          ) : searchError ? (
+            <div style={{ fontSize: 12, color: 'var(--danger, #b91c1c)' }}>{searchError}</div>
           ) : suggestions.length > 0 ? suggestions.map((suggestion) => (
             <button
               key={suggestion.id}
@@ -2337,12 +2217,7 @@ function SyncCenterSurface(props: {
 
     const nextConfig: JiraPluginConfig = {
       ...configJson,
-      providers: nextProviders.map((provider) => serializeProviderConfigForHost(provider)),
-      jiraBaseUrl: undefined,
-      jiraUserEmail: undefined,
-      jiraToken: undefined,
-      jiraTokenRef: undefined,
-      defaultIssueType: undefined
+      ...splitProviderConfigCollections(nextProviders)
     };
 
     try {
@@ -2378,14 +2253,7 @@ function SyncCenterSurface(props: {
 
     const nextConfig: JiraPluginConfig = {
       ...configJson,
-      providers: configuredProviders
-        .filter((provider) => provider.id !== providerDraft.id)
-        .map((provider) => serializeProviderConfigForHost(provider)),
-      jiraBaseUrl: undefined,
-      jiraUserEmail: undefined,
-      jiraToken: undefined,
-      jiraTokenRef: undefined,
-      defaultIssueType: undefined
+      ...splitProviderConfigCollections(configuredProviders.filter((provider) => provider.id !== providerDraft.id))
     };
 
     try {
@@ -2711,88 +2579,41 @@ function SyncCenterSurface(props: {
 
         {currentPage === 'project' ? (
           <div style={stackStyle(14)}>
-            <div style={sectionCardStyle()}>
-            <div style={stackStyle(12)}>
-              <div style={rowStyle()}>
-                <strong>Provider</strong>
-                  {selectedProviderStatus ? (
-                    <span style={healthBadgeStyle(selectedProviderStatus.status)}>
-                      {formatProviderHealthLabel(selectedProviderStatus.status, selectedProviderStatus.healthLabel)}
-                    </span>
-                  ) : null}
-                </div>
-                <div style={stackStyle(6)}>
-                  <span style={{ fontSize: 13, fontWeight: 600 }}>Saved provider</span>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto auto', gap: 8, alignItems: 'end' }}>
-                    <select
-                      style={inputStyle()}
-                      value={selectedProviderId}
-                      disabled={!activeProjectId}
-                      onChange={(event) => void handleProviderSelection(event.target.value)}
-                    >
-                      <option value="">None</option>
-                      {configuredProviders.map((provider) => (
-                        <option key={provider.id} value={provider.id}>{provider.name || 'Untitled provider'}</option>
-                      ))}
-                    </select>
-                    <button
-                      type="button"
-                      style={buttonStyle()}
-                      onClick={() => openCreateProviderPage()}
-                    >
-                      {buttonLabel('add', 'Create provider')}
-                    </button>
-                    <button
-                      type="button"
-                      style={buttonStyle()}
-                      disabled={!selectedProvider}
-                      onClick={() => openProviderDetailPage(selectedProvider?.id)}
-                    >
-                      {buttonLabel('save', 'Edit provider')}
-                    </button>
-                    <button
-                      type="button"
-                      style={buttonStyle()}
-                      disabled={!providerEnabled || !activeProjectId || saveProject.busy}
-                      onClick={() => void handleDisableSync()}
-                    >
-                      {buttonLabel('close', saveProject.busy ? 'Disabling…' : 'Disable syncing')}
-                    </button>
-                  </div>
-                </div>
-                {!providerEnabled ? (
-                  <div style={{ fontSize: 12, opacity: 0.75 }}>
-                    Select a provider when you want to enable sync. Imported-issue cleanup stays available even when syncing is disabled.
-                  </div>
-                ) : null}
-                {providerEnabled && shouldShowProviderHealthMessage(selectedProviderStatus?.status) && selectedProviderStatus?.healthMessage ? (
-                  <div style={{ fontSize: 12, opacity: 0.72 }}>
-                    {selectedProviderStatus.healthMessage}
-                  </div>
-                ) : null}
-              </div>
-            </div>
+            <ProjectProviderSelectionSection
+              sectionCardStyle={sectionCardStyle}
+              stackStyle={stackStyle}
+              rowStyle={rowStyle}
+              buttonStyle={buttonStyle}
+              inputStyle={inputStyle}
+              buttonLabel={buttonLabel}
+              healthBadgeStyle={healthBadgeStyle}
+              formatProviderHealthLabel={formatProviderHealthLabel}
+              shouldShowProviderHealthMessage={shouldShowProviderHealthMessage}
+              selectedProviderStatus={selectedProviderStatus}
+              configuredProviders={configuredProviders}
+              selectedProviderId={selectedProviderId}
+              selectedProvider={selectedProvider}
+              providerEnabled={providerEnabled}
+              activeProjectId={activeProjectId}
+              saveProjectBusy={saveProject.busy}
+              onProviderSelection={(providerId) => { void handleProviderSelection(providerId); }}
+              onCreateProvider={openCreateProviderPage}
+              onEditProvider={() => openProviderDetailPage(selectedProvider?.id)}
+              onDisableSync={() => { void handleDisableSync(); }}
+            />
 
             {!providerEnabled ? (
-              <div style={sectionCardStyle()}>
-                <div style={stackStyle(10)}>
-                  <strong>Imported issue cleanup</strong>
-                  <div style={{ fontSize: 12, opacity: 0.75 }}>
-                    Cleanup stays available even when no provider is currently selected for this project.
-                  </div>
-                  <div style={rowStyle()}>
-                    <button
-                      type="button"
-                      style={buttonStyle()}
-                      disabled={!activeProjectId || cleanupCandidates.busy}
-                      onClick={() => void handleCleanup()}
-                    >
-                      {buttonLabel('hide', cleanupCandidates.busy ? 'Preparing…' : 'Hide imported issues')}
-                    </button>
-                  </div>
-                  <ResultMessage message={projectBottomMessage} tone={projectBottomMessageTone} />
-                </div>
-              </div>
+              <ProviderDisabledCleanupSection
+                sectionCardStyle={sectionCardStyle}
+                stackStyle={stackStyle}
+                rowStyle={rowStyle}
+                buttonStyle={buttonStyle}
+                buttonLabel={buttonLabel}
+                activeProjectId={activeProjectId}
+                cleanupBusy={cleanupCandidates.busy}
+                onCleanup={() => { void handleCleanup(); }}
+                bottomMessageNode={<ResultMessage message={projectBottomMessage} tone={projectBottomMessageTone} />}
+              />
             ) : null}
 
             {providerEnabled ? (
@@ -3179,37 +3000,20 @@ function SyncCenterSurface(props: {
                   </div>
                 ) : null}
 
-                <div style={{ ...sectionCardStyle(), display: 'grid', gap: 10 }}>
-                  <div style={{ fontSize: 12, opacity: 0.72 }}>
-                    Sync saves this project’s settings first and then runs against the currently selected provider.
-                  </div>
-                  <div style={rowStyle()}>
-                    <button
-                      type="button"
-                      style={buttonStyle('primary')}
-                      disabled={!activeProjectId || saveProject.busy || configSaving}
-                      onClick={() => void persistProjectSettings()}
-                    >
-                      {buttonLabel('save', saveProject.busy || configSaving ? 'Saving…' : 'Save settings')}
-                    </button>
-                    <button
-                      type="button"
-                      style={buttonStyle('success')}
-                      disabled={!activeProjectId || runSync.busy || saveProject.busy || configSaving}
-                      onClick={() => void handleRunSync()}
-                    >
-                      {buttonLabel('sync', runSync.busy ? 'Syncing…' : 'Sync issues')}
-                    </button>
-                    <button
-                      type="button"
-                      style={buttonStyle()}
-                      disabled={!activeProjectId || cleanupCandidates.busy || saveProject.busy}
-                      onClick={() => void handleCleanup()}
-                    >
-                      {buttonLabel('hide', cleanupCandidates.busy ? 'Preparing…' : 'Hide imported issues')}
-                    </button>
-                  </div>
-                </div>
+                <ProjectSyncActionsSection
+                  sectionCardStyle={sectionCardStyle}
+                  rowStyle={rowStyle}
+                  buttonStyle={buttonStyle}
+                  buttonLabel={buttonLabel}
+                  activeProjectId={activeProjectId}
+                  saveProjectBusy={saveProject.busy}
+                  configSaving={configSaving}
+                  runSyncBusy={runSync.busy}
+                  cleanupBusy={cleanupCandidates.busy}
+                  onSave={() => { void persistProjectSettings(); }}
+                  onRunSync={() => { void handleRunSync(); }}
+                  onCleanup={() => { void handleCleanup(); }}
+                />
 
                 <SyncProgressPanel syncProgress={projectPage.data?.syncProgress} />
               </>
@@ -3218,274 +3022,66 @@ function SyncCenterSurface(props: {
         ) : null}
 
         {currentPage === 'providers' ? (
-          <div style={stackStyle(12)}>
-            <div style={sectionCardStyle()}>
-              <div style={stackStyle(12)}>
-                <div style={rowStyle()}>
-                  <div style={{ fontSize: 13, opacity: 0.8, flex: '1 1 240px' }}>
-                    Providers are reusable connections. Choose one to review it, or create a new one.
-                  </div>
-                  <button
-                    type="button"
-                    style={buttonStyle('primary')}
-                    onClick={() => {
-                      setProviderDraft(createEmptyProviderDraft(newProviderType));
-                      setProviderDraftToken('');
-                      setSelectedProviderDetailId(null);
-                      openProviderDetailPage();
-                    }}
-                  >
-                    {buttonLabel('add', 'Create provider')}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {(providerDirectory.data?.providers ?? []).length === 0 ? (
-              <div style={sectionCardStyle()}>
-                No providers saved yet. Add one here, then attach it from an individual project page.
-              </div>
-            ) : (providerDirectory.data?.providers ?? []).map((provider) => (
-              <button
-                key={provider.providerId}
-                type="button"
-                style={pageCardStyle(provider.providerId === selectedProviderId)}
-                onClick={() => openProviderDetailPage(provider.providerId)}
-                data-navigation-target={buildProviderDetailNavigationTarget(provider.providerId)}
-              >
-                <div style={rowStyle()}>
-                  <strong>{provider.displayName}</strong>
-                  <span style={neutralBadgeStyle()}>{providerLabel(provider.providerType, getProviderTypeLabel(provider.providerType))}</span>
-                  <span style={healthBadgeStyle(provider.status)}>
-                    {formatProviderHealthLabel(provider.status, provider.healthLabel)}
-                  </span>
-                </div>
-                <div style={{ fontSize: 13, opacity: 0.8 }}>
-                  {shouldShowProviderHealthMessage(provider.status) && provider.healthMessage
-                    ? provider.healthMessage
-                    : provider.configSummary || 'Open to review connection details.'}
-                </div>
-              </button>
-            ))}
-          </div>
+          <ProviderDirectorySection
+            providerDirectory={providerDirectory.data}
+            selectedProviderId={selectedProviderId}
+            newProviderType={newProviderType}
+            sectionCardStyle={sectionCardStyle}
+            stackStyle={stackStyle}
+            rowStyle={rowStyle}
+            buttonStyle={buttonStyle}
+            pageCardStyle={pageCardStyle}
+            neutralBadgeStyle={neutralBadgeStyle}
+            healthBadgeStyle={healthBadgeStyle}
+            buttonLabel={buttonLabel}
+            providerLabel={providerLabel}
+            getProviderTypeLabel={getProviderTypeLabel}
+            formatProviderHealthLabel={formatProviderHealthLabel}
+            shouldShowProviderHealthMessage={shouldShowProviderHealthMessage}
+            buildProviderDetailNavigationTarget={buildProviderDetailNavigationTarget}
+            createEmptyProviderDraft={createEmptyProviderDraft}
+            setProviderDraft={setProviderDraft}
+            setProviderDraftToken={setProviderDraftToken}
+            setSelectedProviderDetailId={setSelectedProviderDetailId}
+            openProviderDetailPage={openProviderDetailPage}
+          />
         ) : null}
 
         {currentPage === 'provider-detail' && providerDraft ? (
-          <div style={sectionCardStyle()}>
-            <div style={stackStyle(12)}>
-              <div style={rowStyle()}>
-                <strong>{providerDetail.data?.mode === 'edit' ? 'Edit provider' : 'Create provider'}</strong>
-                <span style={neutralBadgeStyle()}>{providerLabel(providerDraft.type, getProviderTypeLabel(providerDraft.type))}</span>
-                <span style={healthBadgeStyle(providerDetail.data?.healthStatus)}>
-                  {formatProviderHealthLabel(providerDetail.data?.healthStatus)}
-                </span>
-              </div>
-              {providerDetail.data?.healthMessage ? (
-                <div style={{ fontSize: 12, opacity: 0.74 }}>
-                  {providerDetail.data.healthMessage}
-                </div>
-              ) : null}
-              <label style={stackStyle(6)}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>Provider type</span>
-                <select
-                  style={inputStyle()}
-                  value={providerDraft.type}
-                  onChange={(event) => {
-                    const nextType = event.target.value as ProviderType;
-                    setNewProviderType(nextType);
-                    setProviderDraft((current) => current ? {
-                      ...current,
-                      type: nextType,
-                      ...(isGitHubProviderType(nextType)
-                        ? {
-                            githubApiBaseUrl: current.githubApiBaseUrl ?? 'https://api.github.com',
-                            defaultRepository: current.defaultRepository ?? '',
-                            jiraBaseUrl: undefined,
-                            jiraUserEmail: undefined
-                          }
-                        : {
-                            jiraBaseUrl: current.jiraBaseUrl ?? '',
-                            jiraUserEmail: current.jiraUserEmail ?? '',
-                            defaultIssueType: current.defaultIssueType ?? DEFAULT_JIRA_ISSUE_TYPE,
-                            githubApiBaseUrl: undefined,
-                            defaultRepository: undefined
-                          })
-                    } : createEmptyProviderDraft(nextType));
-                  }}
-                >
-                  {(providerDetail.data?.availableProviderTypes ?? providerDirectory.data?.availableProviderTypes ?? []).map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </label>
-              <label style={stackStyle(6)}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>Provider name</span>
-                <input
-                  style={inputStyle()}
-                  value={providerDraft.name}
-                  placeholder="Oracle Jira"
-                  onChange={(event) => setProviderDraft((current) => current ? {
-                    ...current,
-                    name: event.target.value
-                  } : null)}
-                />
-              </label>
-              {isJiraProviderType(providerDraft.type) ? (
-                <>
-                  <label style={stackStyle(6)}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>Jira base URL</span>
-                    <input
-                      style={inputStyle()}
-                      value={providerDraft.jiraBaseUrl ?? ''}
-                      placeholder="https://jira.example.com"
-                      onChange={(event) => setProviderDraft((current) => current ? {
-                        ...current,
-                        jiraBaseUrl: event.target.value
-                      } : null)}
-                    />
-                  </label>
-                  <div style={{ fontSize: 12, opacity: 0.75 }}>
-                    Use only the Jira host. Project keys belong on project mappings, not on the provider record.
-                  </div>
-                  <label style={stackStyle(6)}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>Jira user email</span>
-                    <input
-                      style={inputStyle()}
-                      value={providerDraft.jiraUserEmail ?? ''}
-                      placeholder="Optional for Basic auth Jira setups"
-                      onChange={(event) => setProviderDraft((current) => current ? {
-                        ...current,
-                        jiraUserEmail: event.target.value
-                      } : null)}
-                    />
-                  </label>
-                  <label style={stackStyle(6)}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>Default issue type</span>
-                    <select
-                      style={inputStyle()}
-                      value={providerDraft.defaultIssueType ?? DEFAULT_JIRA_ISSUE_TYPE}
-                      onChange={(event) => setProviderDraft((current) => current ? {
-                        ...current,
-                        defaultIssueType: event.target.value
-                      } : null)}
-                    >
-                      {JIRA_ISSUE_TYPE_OPTIONS.map((issueType) => (
-                        <option key={issueType} value={issueType}>{issueType}</option>
-                      ))}
-                    </select>
-                  </label>
-                </>
-              ) : (
-                <>
-                  <label style={stackStyle(6)}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>GitHub API base URL</span>
-                    <input
-                      style={inputStyle()}
-                      value={providerDraft.githubApiBaseUrl ?? ''}
-                      placeholder="https://api.github.com"
-                      onChange={(event) => setProviderDraft((current) => current ? {
-                        ...current,
-                        githubApiBaseUrl: event.target.value
-                      } : null)}
-                    />
-                  </label>
-                  <label style={stackStyle(6)}>
-                    <span style={{ fontSize: 13, fontWeight: 600 }}>Default repository</span>
-                    <input
-                      style={inputStyle()}
-                      value={providerDraft.defaultRepository ?? ''}
-                      placeholder="owner/repo"
-                      onChange={(event) => setProviderDraft((current) => current ? {
-                        ...current,
-                        defaultRepository: event.target.value
-                      } : null)}
-                    />
-                  </label>
-                </>
-              )}
-              <label style={stackStyle(6)}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>
-                  {isJiraProviderType(providerDraft.type) ? 'Jira API token' : 'GitHub Personal Access Token'}
-                </span>
-                <input
-                  style={inputStyle()}
-                  type="password"
-                  value={providerDraftToken}
-                  placeholder={
-                    providerDetail.data?.tokenSaved
-                      ? '********'
-                      : (isJiraProviderType(providerDraft.type) ? 'Paste Jira API token' : 'Paste GitHub Personal Access Token')
-                  }
-                  onChange={(event) => setProviderDraftToken(event.target.value)}
-                />
-              </label>
-              {providerDetail.data?.tokenSaved ? (
-                <div style={{ fontSize: 12, opacity: 0.75 }}>
-                  Leave the token field unchanged to keep the current token. Enter a new value only to replace it.
-                </div>
-              ) : null}
-              {!isJiraProviderType(providerDraft.type) ? (
-                <div style={{ fontSize: 12, opacity: 0.75, lineHeight: 1.45 }}>
-                  Use a GitHub Personal Access Token. Fine-grained tokens should grant issue write access for the selected repository.
-                  {' '}
-                  <a
-                    href="https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens"
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{ color: 'inherit' }}
-                  >
-                    Learn about GitHub personal access tokens
-                  </a>
-                  .
-                </div>
-              ) : null}
-              <div style={rowStyle()}>
-                <button
-                  type="button"
-                  style={buttonStyle('secondary')}
-                  disabled={testConnection.busy}
-                  onClick={() => void testConnection.run({
-                    companyId,
-                    providerId: providerDraft.id,
-                    providerKey: providerDraft.type,
-                    config: isJiraProviderType(providerDraft.type)
-                      ? {
-                          ...providerDraft,
-                          jiraBaseUrl: providerDraft.jiraBaseUrl?.trim() || undefined,
-                          jiraUserEmail: providerDraft.jiraUserEmail?.trim() || undefined,
-                          defaultIssueType: providerDraft.defaultIssueType?.trim() || DEFAULT_JIRA_ISSUE_TYPE,
-                          ...(providerDraftToken.trim() ? { jiraToken: providerDraftToken.trim() } : {})
-                        }
-                      : {
-                          ...providerDraft,
-                          githubApiBaseUrl: providerDraft.githubApiBaseUrl?.trim() || undefined,
-                          defaultRepository: providerDraft.defaultRepository?.trim() || undefined,
-                          ...(providerDraftToken.trim() ? { githubToken: providerDraftToken.trim() } : {})
-                        }
-                  })}
-                >
-                  {buttonLabel('sync', testConnection.busy ? 'Testing…' : 'Test connection')}
-                </button>
-                <button
-                  type="button"
-                  style={buttonStyle('primary')}
-                  disabled={configSaving}
-                  onClick={() => void handleSaveProviderDefinition()}
-                >
-                  {buttonLabel('save', configSaving ? 'Saving…' : 'Save provider')}
-                </button>
-                {providerDetail.data?.mode === 'edit' ? (
-                  <button
-                    type="button"
-                    style={buttonStyle()}
-                    onClick={() => void handleDeleteProviderDefinition()}
-                  >
-                    {buttonLabel('close', 'Remove provider')}
-                  </button>
-                ) : null}
-              </div>
-            </div>
-          </div>
+          <ProviderDetailSection
+            providerDraft={providerDraft}
+            providerDraftToken={providerDraftToken}
+            providerDetailData={providerDetail.data}
+            providerDirectoryData={providerDirectory.data}
+            newProviderType={newProviderType}
+            companyId={companyId}
+            configSaving={configSaving}
+            testConnectionBusy={testConnection.busy}
+            setProviderDraft={setProviderDraft}
+            setProviderDraftToken={setProviderDraftToken}
+            setNewProviderType={setNewProviderType}
+            createEmptyProviderDraft={createEmptyProviderDraft}
+            buttonStyle={buttonStyle}
+            stackStyle={stackStyle}
+            rowStyle={rowStyle}
+            inputStyle={inputStyle}
+            sectionCardStyle={sectionCardStyle}
+            neutralBadgeStyle={neutralBadgeStyle}
+            healthBadgeStyle={healthBadgeStyle}
+            buttonLabel={buttonLabel}
+            providerLabel={providerLabel}
+            getProviderTypeLabel={getProviderTypeLabel}
+            formatProviderHealthLabel={formatProviderHealthLabel}
+            onTestConnection={(input) => { void testConnection.run(input as {
+              companyId: string;
+              projectId?: string;
+              providerId?: string;
+              providerKey?: ProviderType;
+              config: JiraProviderConfig;
+            }); }}
+            onSaveProvider={() => { void handleSaveProviderDefinition(); }}
+            onDeleteProvider={() => { void handleDeleteProviderDefinition(); }}
+          />
         ) : null}
 
         {mappingModal ? (
@@ -3922,8 +3518,8 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
     companyId,
     issueId
   });
-  const pushIssue = useActionRunner<{ companyId: string; issueId: string }>('issue.pushToJira');
-  const pullIssue = useActionRunner<{ companyId: string; issueId: string }>('issue.pullFromJira');
+  const pushIssue = useActionRunner<{ companyId: string; issueId: string }>('issue.pushToUpstream');
+  const pullIssue = useActionRunner<{ companyId: string; issueId: string }>('issue.pullFromUpstream');
   const setUpstreamStatus = useActionRunner<{ companyId: string; issueId: string; transitionId: string }>('issue.setUpstreamStatus');
   const setUpstreamAssignee = useActionRunner<{
     companyId: string;
@@ -3968,6 +3564,10 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
     ? (detail.data.upstreamIssueKey ?? 'Linked upstream issue')
     : `Local issue for ${platformName}`;
   const statusValue = formatUpstreamStatusLabel(providerType, detail.data.upstreamStatus);
+  const supportsIssueUpdate = detail.data.supportsIssueUpdate !== false;
+  const supportsStatusUpdates = detail.data.supportsStatusUpdates !== false;
+  const supportsAssignableUsers = detail.data.supportsAssignableUsers !== false;
+  const supportsComments = detail.data.supportsComments !== false;
 
   return (
     <div style={stackStyle(14)}>
@@ -4013,7 +3613,7 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
               <button
                 type="button"
                 style={buttonStyle('primary')}
-                disabled={!companyId || !issueId || pushIssue.busy}
+                disabled={!companyId || !issueId || pushIssue.busy || !supportsIssueUpdate}
                 onClick={() => void pushIssue.run({ companyId, issueId }).then((result) => {
                   if (result) {
                     void detail.refresh();
@@ -4050,11 +3650,11 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
             <div style={metricCardStyle()}>
               <div style={{ ...rowStyle(), justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div style={{ fontSize: 11, opacity: 0.58, letterSpacing: '0.14em', textTransform: 'uppercase' }}>Status</div>
-                {detail.data.upstreamTransitions && detail.data.upstreamTransitions.length > 0 ? (
+                {supportsStatusUpdates && detail.data.upstreamTransitions && detail.data.upstreamTransitions.length > 0 ? (
                   <button
                     type="button"
                     style={iconButtonStyle()}
-                    disabled={!companyId || !issueId || setUpstreamStatus.busy}
+                    disabled={!companyId || !issueId || setUpstreamStatus.busy || !supportsStatusUpdates}
                     onClick={() => {
                       setStatusTransitionDraft('');
                       setStatusEditorOpen(true);
@@ -4076,11 +3676,11 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
             <div style={metricCardStyle()}>
               <div style={{ ...rowStyle(), justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div style={{ fontSize: 11, opacity: 0.58, letterSpacing: '0.14em', textTransform: 'uppercase' }}>Assignee</div>
-                {isSynced ? (
+                {isSynced && supportsAssignableUsers ? (
                   <button
                     type="button"
                     style={iconButtonStyle()}
-                    disabled={!companyId || !issueId || !detail.data.upstreamProviderId || setUpstreamAssignee.busy}
+                    disabled={!companyId || !issueId || !detail.data.upstreamProviderId || setUpstreamAssignee.busy || !supportsAssignableUsers}
                     onClick={() => {
                       setUpstreamAssigneeDraft(null);
                       setAssigneeEditorOpen(true);
@@ -4128,7 +3728,7 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
           }
         />
 
-        {detail.data.isSynced ? (
+        {detail.data.isSynced && supportsComments ? (
           <div style={sectionCardStyle()}>
             <div style={stackStyle(12)}>
               <div style={rowStyle()}>
@@ -4219,7 +3819,7 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
           </div>
         ) : null}
 
-        {statusEditorOpen && detail.data.upstreamTransitions && detail.data.upstreamTransitions.length > 0 ? (
+        {statusEditorOpen && supportsStatusUpdates && detail.data.upstreamTransitions && detail.data.upstreamTransitions.length > 0 ? (
           <div style={modalBackdropStyle()}>
             <div style={modalPanelStyle(460)}>
               <div style={stackStyle(12)}>
@@ -4357,7 +3957,7 @@ export function JiraSyncCommentAnnotation(): React.JSX.Element {
     issueId,
     commentId
   });
-  const pushComment = useActionRunner<{ companyId: string; issueId: string; commentId: string }>('comment.uploadToProvider');
+  const pushComment = useActionRunner<{ companyId: string; issueId: string; commentId: string }>('comment.pushToUpstream');
 
   if (!annotation.data?.visible) {
     return <></>;
@@ -4538,8 +4138,7 @@ export function JiraSyncEntityToolbarButton(): React.JSX.Element {
           if (!configured) {
             toast({
               title: 'External Issue Sync',
-              body: 'Configure a provider first, then sync from this button.',
-              tone: 'default'
+              body: 'Configure a provider first, then sync from this button.'
             });
             return;
           }

@@ -1,6 +1,5 @@
 import { createRequire } from 'node:module';
 import type { PaperclipPluginManifestV1 } from '@paperclipai/plugin-sdk';
-import { PROVIDER_TYPE_OPTIONS } from './providers/shared/types.ts';
 import { ISSUE_PROVIDER_AGENT_TOOLS } from './issue-provider-agent-tools.ts';
 
 const require = createRequire(import.meta.url);
@@ -44,47 +43,55 @@ export const manifest: PaperclipPluginManifestV1 = {
   instanceConfigSchema: {
     type: 'object',
     properties: {
-      providers: {
+      jiraDcProviders: {
         type: 'array',
-        title: 'Saved issue providers',
+        title: 'Saved Jira Data Center providers',
         items: {
           type: 'object',
           properties: {
             id: { type: 'string' },
-            type: { type: 'string', enum: ['jira', ...PROVIDER_TYPE_OPTIONS] },
+            type: { type: 'string', enum: ['jira_dc'] },
             name: { type: 'string' },
             jiraBaseUrl: { type: 'string' },
             jiraUserEmail: { type: 'string' },
             jiraToken: { type: 'string' },
             jiraTokenRef: { type: 'string' },
-            defaultIssueType: { type: 'string' },
+            defaultIssueType: { type: 'string' }
+          }
+        }
+      },
+      jiraCloudProviders: {
+        type: 'array',
+        title: 'Saved Jira Cloud providers',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            type: { type: 'string', enum: ['jira_cloud'] },
+            name: { type: 'string' },
+            jiraBaseUrl: { type: 'string' },
+            jiraUserEmail: { type: 'string' },
+            jiraToken: { type: 'string' },
+            jiraTokenRef: { type: 'string' },
+            defaultIssueType: { type: 'string' }
+          }
+        }
+      },
+      githubProviders: {
+        type: 'array',
+        title: 'Saved GitHub providers',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            type: { type: 'string', enum: ['github_issues'] },
+            name: { type: 'string' },
             githubApiBaseUrl: { type: 'string' },
             githubToken: { type: 'string' },
             githubTokenRef: { type: 'string' },
             defaultRepository: { type: 'string' }
           }
         }
-      },
-      jiraBaseUrl: {
-        type: 'string',
-        title: 'Jira Base URL'
-      },
-      jiraUserEmail: {
-        type: 'string',
-        title: 'Jira User Email'
-      },
-      jiraToken: {
-        type: 'string',
-        title: 'Jira API Token',
-        description: 'Optional inline Jira API token for local provider configuration.'
-      },
-      jiraTokenRef: {
-        type: 'string',
-        title: 'Jira API Token Secret Ref'
-      },
-      defaultIssueType: {
-        type: 'string',
-        title: 'Default Jira Issue Type'
       }
     }
   },

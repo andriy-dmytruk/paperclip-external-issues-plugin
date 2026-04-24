@@ -1,4 +1,4 @@
-import { parseRepositoryReference } from '../github-repo.ts';
+import { parseRepositoryReference } from '../providers/github-issues/repository.ts';
 
 export type SyncPageId = 'projects' | 'project' | 'providers' | 'provider-detail';
 

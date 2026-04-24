@@ -1,12 +1,12 @@
-import { jiraDcProviderAdapter } from './jira-dc/adapter.ts';
-import { jiraCloudProviderAdapter } from './jira-cloud/adapter.ts';
-import { githubIssuesProviderAdapter } from './github-issues/adapter.ts';
+import { createJiraDcProviderAdapter } from './jira-dc/adapter.ts';
+import { createJiraCloudProviderAdapter } from './jira-cloud/adapter.ts';
+import { createGitHubIssuesProviderAdapter } from './github-issues/adapter.ts';
 import { ProviderRegistry } from './shared/registry.ts';
 
-export function createProviderRegistry(): ProviderRegistry {
-  const registry = new ProviderRegistry();
-  registry.register(jiraDcProviderAdapter);
-  registry.register(jiraCloudProviderAdapter);
-  registry.register(githubIssuesProviderAdapter);
+export function createProviderRegistry<TContext>(): ProviderRegistry<TContext> {
+  const registry = new ProviderRegistry<TContext>();
+  registry.register(createJiraDcProviderAdapter<TContext>());
+  registry.register(createJiraCloudProviderAdapter<TContext>());
+  registry.register(createGitHubIssuesProviderAdapter<TContext>());
   return registry;
 }
