@@ -1,11 +1,11 @@
-export interface JiraUserReference {
+export interface UpstreamUserReference {
   accountId: string;
   displayName: string;
   emailAddress?: string;
   username?: string;
 }
 
-export function formatJiraUserLabel(user?: JiraUserReference | null): string {
+export function formatUpstreamUserLabel(user?: UpstreamUserReference | null): string {
   if (!user) {
     return '';
   }
@@ -13,7 +13,7 @@ export function formatJiraUserLabel(user?: JiraUserReference | null): string {
   return user.displayName || user.emailAddress || user.username || user.accountId;
 }
 
-export function formatJiraUserSecondary(user?: JiraUserReference | null): string {
+export function formatUpstreamUserSecondary(user?: UpstreamUserReference | null): string {
   if (!user) {
     return '';
   }
@@ -33,9 +33,9 @@ export function formatJiraUserSecondary(user?: JiraUserReference | null): string
   return '';
 }
 
-export function sameJiraUser(
-  left?: JiraUserReference | null,
-  right?: JiraUserReference | null
+export function sameUpstreamUser(
+  left?: UpstreamUserReference | null,
+  right?: UpstreamUserReference | null
 ): boolean {
   if (!left && !right) {
     return true;
