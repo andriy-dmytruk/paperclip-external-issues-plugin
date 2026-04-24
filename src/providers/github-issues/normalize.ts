@@ -3,6 +3,7 @@ import type { JiraCommentRecord, JiraIssueRecord } from '../jira/models.ts';
 
 interface GitHubConfigLike {
   defaultRepository?: string;
+  apiBaseUrl?: string;
 }
 
 interface GitHubMappingLike {
@@ -39,14 +40,23 @@ export function normalizeGitHubIssueRecord(
   deps: {
     getStatusName(state?: string, stateReason?: string | null): string;
     getStatusCategory(state?: string, stateReason?: string | null): string;
+    apiBaseUrl?: string;
   }
 ): JiraIssueRecord {
   const assigneeDisplayName = value.assignees?.[0]?.login ?? undefined;
   const creatorDisplayName = value.user?.login ?? undefined;
   const issueKey = `${repoFullName}#${value.number}`;
+  const normalizedHost = (() => {
+    try {
+      return new URL(deps.apiBaseUrl ?? 'https://api.github.com').host.toLowerCase();
+    } catch {
+      return 'github.com';
+    }
+  })();
   return {
     id: String(value.id),
     key: issueKey,
+    uniqueUpstreamId: `github:${normalizedHost}:${repoFullName.toLowerCase()}#${value.number}`,
     summary: value.title,
     description: value.body ?? '',
     ...(assigneeDisplayName ? { assigneeDisplayName } : {}),

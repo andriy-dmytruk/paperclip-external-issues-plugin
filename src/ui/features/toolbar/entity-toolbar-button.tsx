@@ -3,12 +3,14 @@ import { useHostContext, usePluginData, usePluginToast } from '@paperclipai/plug
 import { useActionRunner } from '../../hooks.js';
 import { getProviderTypeLabel } from '../../plugin-config.js';
 import {
-  buttonStyle,
-  iconButtonStyle,
   modalBackdropStyle,
+  modalBodyStyle,
+  modalHeaderStyle,
   modalPanelStyle,
   renderButtonIcon,
-  renderProviderIcon
+  renderProviderIcon,
+  toolbarButtonStyle,
+  toolbarIconButtonStyle
 } from '../../primitives.js';
 import type { ProjectToolbarState } from '../../types.js';
 import { SyncCenterSurface } from '../sync-center/sync-center-surface.js';
@@ -64,10 +66,10 @@ export function JiraSyncEntityToolbarButton(): React.JSX.Element {
       <button
         type="button"
         style={{
-          ...buttonStyle('secondary'),
+          ...toolbarButtonStyle(),
           display: 'inline-flex',
           alignItems: 'center',
-          gap: 8,
+          gap: 6,
           whiteSpace: 'nowrap'
         }}
         title="Open project-specific external issue sync settings."
@@ -93,7 +95,7 @@ export function JiraSyncEntityToolbarButton(): React.JSX.Element {
       </button>
       <button
         type="button"
-        style={iconButtonStyle()}
+        style={toolbarIconButtonStyle()}
         title="Sync issues now"
         aria-label="Sync issues now"
         disabled={runSync.busy || !configured}
@@ -121,24 +123,34 @@ export function JiraSyncEntityToolbarButton(): React.JSX.Element {
           onClick={() => setConfigModalOpen(false)}
         >
           <div
-            style={{ ...modalPanelStyle(980), padding: 0, position: 'relative', overflow: 'hidden' }}
+            style={modalPanelStyle(1160)}
             onClick={(event) => event.stopPropagation()}
           >
-            <button
-              type="button"
-              style={{ ...iconButtonStyle(), position: 'absolute', top: 10, right: 10, zIndex: 2 }}
-              aria-label="Close sync configuration"
-              title="Close"
-              onClick={() => setConfigModalOpen(false)}
-            >
-              {renderButtonIcon('close')}
-            </button>
-            <div style={{ padding: 12 }}>
+            <div style={modalHeaderStyle()}>
+              <div style={{ display: 'grid', gap: 4, minWidth: 0 }}>
+                <div style={{ fontSize: 22, fontWeight: 600, lineHeight: 1.2 }}>
+                  {toolbarState.data?.projectName
+                    ? `External Issue Sync for ${toolbarState.data.projectName}`
+                    : 'External Issue Sync'}
+                </div>
+              </div>
+              <button
+                type="button"
+                style={toolbarIconButtonStyle()}
+                aria-label="Close sync configuration"
+                title="Close"
+                onClick={() => setConfigModalOpen(false)}
+              >
+                {renderButtonIcon('close')}
+              </button>
+            </div>
+            <div style={modalBodyStyle()}>
               <SyncCenterSurface
                 companyId={companyId}
                 scopeProjectId={projectId}
                 embeddedTitle="External Issue Sync"
                 modal
+                hideHeader
               />
             </div>
           </div>

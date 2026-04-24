@@ -39,6 +39,7 @@ export interface CanonicalUpstreamStatus {
 export interface CanonicalUpstreamIssue {
   id: string;
   key: string;
+  uniqueUpstreamId: string;
   title: string;
   body: string;
   url: string;

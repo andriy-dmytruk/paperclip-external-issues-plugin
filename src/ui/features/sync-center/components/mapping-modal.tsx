@@ -60,7 +60,7 @@ export function MappingModal(props: {
           <div style={{
             border: '1px solid var(--border)',
             borderRadius: 12,
-            overflow: 'hidden'
+            overflow: 'visible'
           }}
           >
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -84,7 +84,7 @@ export function MappingModal(props: {
                       <input
                         style={inputStyle()}
                         value={props.draft.jiraJql}
-                        placeholder="project = GRB AND statusCategory != Done ORDER BY updated DESC"
+                        placeholder="project = PRJ AND statusCategory != Done ORDER BY updated DESC"
                         onChange={(event) => props.onChange((current) => ({ ...current, jiraJql: event.target.value }))}
                       />
                       <div style={{ fontSize: 12, opacity: 0.72, lineHeight: 1.4, marginTop: 8 }}>
@@ -105,7 +105,7 @@ export function MappingModal(props: {
           <div style={{
             border: '1px solid var(--border)',
             borderRadius: 12,
-            overflow: 'hidden'
+            overflow: 'visible'
           }}
           >
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>

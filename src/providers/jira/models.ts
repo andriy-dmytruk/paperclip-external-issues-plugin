@@ -9,6 +9,7 @@ export interface JiraCommentRecord {
 export interface JiraIssueRecord {
   id: string;
   key: string;
+  uniqueUpstreamId: string;
   summary: string;
   description: string;
   assigneeDisplayName?: string;

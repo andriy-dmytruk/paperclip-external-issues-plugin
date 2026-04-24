@@ -37,8 +37,8 @@ export function EssentialTab(props: {
         </div>
         <div style={{
           border: '1px solid var(--border)',
-          borderRadius: 12,
-          overflow: 'hidden'
+          borderRadius: 4,
+          overflow: 'visible'
         }}
         >
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>

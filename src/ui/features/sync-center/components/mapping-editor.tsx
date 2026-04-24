@@ -53,7 +53,7 @@ export function MappingEditor(props: {
       ) : (
         <div style={{
           border: '1px solid var(--border)',
-          borderRadius: 12,
+          borderRadius: 4,
           overflow: 'hidden'
         }}
         >

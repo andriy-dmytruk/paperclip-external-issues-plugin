@@ -25,10 +25,13 @@ type ProviderDirectoryProps = {
   setProviderDraft: React.Dispatch<React.SetStateAction<JiraProviderConfig | null>>;
   setProviderDraftToken: React.Dispatch<React.SetStateAction<string>>;
   setSelectedProviderDetailId: React.Dispatch<React.SetStateAction<string | null>>;
+  openCreateProviderPage: () => void;
   openProviderDetailPage: (providerId?: string) => void;
 };
 
 export function ProviderDirectorySection(props: ProviderDirectoryProps): React.JSX.Element {
+  const providers = props.providerDirectory?.providers ?? [];
+
   return (
     <div style={props.stackStyle(12)}>
       <div style={props.sectionCardStyle()}>
@@ -44,7 +47,7 @@ export function ProviderDirectorySection(props: ProviderDirectoryProps): React.J
                 props.setProviderDraft(props.createEmptyProviderDraft(props.newProviderType));
                 props.setProviderDraftToken('');
                 props.setSelectedProviderDetailId(null);
-                props.openProviderDetailPage();
+                props.openCreateProviderPage();
               }}
             >
               {props.buttonLabel('add', 'Create provider')}
@@ -53,32 +56,131 @@ export function ProviderDirectorySection(props: ProviderDirectoryProps): React.J
         </div>
       </div>
 
-      {(props.providerDirectory?.providers ?? []).length === 0 ? (
+      {providers.length === 0 ? (
         <div style={props.sectionCardStyle()}>
           No providers saved yet. Add one here, then attach it from an individual project page.
         </div>
-      ) : (props.providerDirectory?.providers ?? []).map((provider: AnyRecord) => (
-        <button
-          key={provider.providerId}
-          type="button"
-          style={props.pageCardStyle(provider.providerId === props.selectedProviderId)}
-          onClick={() => props.openProviderDetailPage(provider.providerId)}
-          data-navigation-target={props.buildProviderDetailNavigationTarget(provider.providerId)}
-        >
-          <div style={props.rowStyle()}>
-            <strong>{provider.displayName}</strong>
-            <span style={props.neutralBadgeStyle()}>{props.providerLabel(provider.providerType, props.getProviderTypeLabel(provider.providerType))}</span>
-            <span style={props.healthBadgeStyle(provider.status)}>
-              {props.formatProviderHealthLabel(provider.status, provider.healthLabel)}
-            </span>
-          </div>
-          <div style={{ fontSize: 13, opacity: 0.8 }}>
-            {props.shouldShowProviderHealthMessage(provider.status) && provider.healthMessage
-              ? provider.healthMessage
-              : provider.configSummary || 'Open to review connection details.'}
-          </div>
-        </button>
-      ))}
+      ) : (
+        <div style={{ ...props.sectionCardStyle(), padding: 0, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: 'color-mix(in srgb, var(--muted, #888) 10%, transparent)' }}>
+                <th style={{
+                  textAlign: 'left',
+                  padding: '10px 12px',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  opacity: 0.82,
+                  borderBottom: '1px solid var(--border)'
+                }}
+                >
+                  Provider
+                </th>
+                <th style={{
+                  textAlign: 'left',
+                  padding: '10px 12px',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  opacity: 0.82,
+                  borderBottom: '1px solid var(--border)'
+                }}
+                >
+                  Type
+                </th>
+                <th style={{
+                  textAlign: 'left',
+                  padding: '10px 12px',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  opacity: 0.82,
+                  borderBottom: '1px solid var(--border)'
+                }}
+                >
+                  Status
+                </th>
+                <th style={{
+                  textAlign: 'left',
+                  padding: '10px 12px',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  opacity: 0.82,
+                  borderBottom: '1px solid var(--border)'
+                }}
+                >
+                  Summary
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {providers.map((provider: AnyRecord) => {
+                const selected = provider.providerId === props.selectedProviderId;
+                return (
+                  <tr
+                    key={provider.providerId}
+                    onClick={() => props.openProviderDetailPage(provider.providerId)}
+                    data-navigation-target={props.buildProviderDetailNavigationTarget(provider.providerId)}
+                    style={{
+                      cursor: 'pointer',
+                      background: selected
+                        ? 'color-mix(in srgb, #16a34a 5%, var(--card, transparent))'
+                        : 'transparent'
+                    }}
+                  >
+                    <td style={{
+                      padding: '12px',
+                      borderBottom: '1px solid var(--border)',
+                      verticalAlign: 'top',
+                      borderLeft: selected ? '2px solid #16a34a' : '2px solid transparent'
+                    }}
+                    >
+                      <div style={{ display: 'grid', gap: 4 }}>
+                        <strong>{provider.displayName}</strong>
+                        {selected ? (
+                          <span style={{ fontSize: 12, opacity: 0.68 }}>
+                            Selected
+                          </span>
+                        ) : null}
+                      </div>
+                    </td>
+                    <td style={{
+                      padding: '12px',
+                      borderBottom: '1px solid var(--border)',
+                      verticalAlign: 'top'
+                    }}
+                    >
+                      <span style={props.neutralBadgeStyle()}>
+                        {props.providerLabel(provider.providerType, props.getProviderTypeLabel(provider.providerType))}
+                      </span>
+                    </td>
+                    <td style={{
+                      padding: '12px',
+                      borderBottom: '1px solid var(--border)',
+                      verticalAlign: 'top'
+                    }}
+                    >
+                      <span style={props.healthBadgeStyle(provider.status)}>
+                        {props.formatProviderHealthLabel(provider.status, provider.healthLabel)}
+                      </span>
+                    </td>
+                    <td style={{
+                      padding: '12px',
+                      borderBottom: '1px solid var(--border)',
+                      verticalAlign: 'top',
+                      fontSize: 13,
+                      opacity: 0.8
+                    }}
+                    >
+                      {props.shouldShowProviderHealthMessage(provider.status) && provider.healthMessage
+                        ? provider.healthMessage
+                        : provider.configSummary || 'Open to review connection details.'}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

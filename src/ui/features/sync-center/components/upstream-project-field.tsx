@@ -4,8 +4,7 @@ import { isGitHubProviderType } from '../../../../providers/shared/config.ts';
 import {
   getProviderProjectLabel,
   getProviderProjectPlaceholder,
-  getSuggestedUpstreamProjectKey,
-  getProviderPlatformName
+  getSuggestedUpstreamProjectKey
 } from '../../../primitives.js';
 import { UpstreamProjectAutocomplete } from '../../shared/shared-controls.js';
 import { mappingTableMutedTextStyle, statusMappingCellStyle } from '../../shared/feature-primitives.js';
@@ -32,8 +31,8 @@ export function renderUpstreamProjectHint(props: {
       {suggestedRepository
         ? `Prefilled from this Paperclip project's bound GitHub repository: ${suggestedRepository}. You can still override it here.`
         : props.mappingMode
-          ? 'Use `owner/repo`. Filters below apply to the selected repository feed.'
-          : `Use \`owner/repo\` for the default ${getProviderPlatformName(props.providerType)} repository.`}
+          ? 'Filters below apply to the selected repository feed.'
+          : null}
     </div>
   );
 }

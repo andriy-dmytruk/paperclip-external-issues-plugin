@@ -18,10 +18,10 @@ External Issue Sync is a Paperclip plugin for synchronizing external issues into
 - Project-scoped sync settings MUST be organized into tabs for essential configuration, agent access, project mappings, and status mapping, while sync actions and sync status remain visible at the bottom of the project page.
 - The sync flow MUST import Jira issues into the selected Paperclip project's configured Jira mappings.
 - Imported issues MUST retain the original Jira key as hidden durable metadata in the Paperclip issue description.
-- Synced issues MUST use a stable upstream-key title prefix fallback such as `[GRB-123]` so synced/local state stays visible even without host row styling.
+- Synced issues SHOULD use a stable upstream-key title prefix such as `[PRJ-123]` so synced/local state stays visible even without host row styling.
 - The worker MUST persist durable plugin-owned link metadata for synced issues and synced comments.
 - The worker MUST treat Jira upstream status and Paperclip local status as separate fields; Jira status metadata MUST remain visible even when Paperclip status differs.
-- The issue detail contribution MUST only present an issue as Jira-linked when the current Paperclip issue still carries the Jira sync markers for that upstream issue.
+- The issue detail contribution MUST present an issue as linked based on durable plugin-owned link metadata, not title or description markers.
 - Jira-linked Paperclip issues MUST expose separate pull and push actions plus a visible `Open in Jira` action from the issue detail contribution.
 - Pure Paperclip issues in configured projects MUST expose a push action that creates the upstream Jira issue.
 - Jira-linked issue controls SHOULD match Paperclip dark-mode styling and avoid bright opaque button fills when the host uses transparent actions.

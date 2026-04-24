@@ -43,7 +43,7 @@ export function StatusMappingTab(props: {
         </div>
         <div style={{
           border: '1px solid var(--border)',
-          borderRadius: 10,
+          borderRadius: 4,
           overflow: 'hidden'
         }}
         >

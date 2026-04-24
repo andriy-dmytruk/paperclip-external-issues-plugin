@@ -251,7 +251,8 @@ export async function buildProjectToolbarStateData(
     syncStatus: normalizeOptionalString(syncStateRecord.status) ?? 'idle',
     providerType,
     providerName: normalizeOptionalString(providerName),
-    projectId
+    projectId,
+    projectName: normalizeOptionalString(settingsData.selectedProjectName)
   };
 }
 

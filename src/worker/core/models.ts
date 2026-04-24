@@ -124,6 +124,7 @@ export interface UpstreamProjectSearchResult {
 export interface UpstreamIssueRecord {
   id: string;
   key: string;
+  uniqueUpstreamId: string;
   summary: string;
   description: string;
   url: string;
@@ -148,9 +149,7 @@ export interface UpstreamIssueLinkData {
   companyId: string;
   projectId?: string;
   providerId?: string;
-  upstreamProviderType?: ProviderType;
-  upstreamProviderScope?: string;
-  upstreamIdentityKey?: string;
+  uniqueUpstreamId: string;
   jiraIssueId: string;
   jiraIssueKey: string;
   jiraProjectKey: string;

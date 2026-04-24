@@ -182,6 +182,7 @@ export function useSyncCenterController(props: {
   );
   const [selectedProviderId, setSelectedProviderId] = useState<string>('');
   const [selectedProviderDetailId, setSelectedProviderDetailId] = useState<string | null>(null);
+  const [providerReturnPage, setProviderReturnPage] = useState<SyncPageId>('providers');
   const activeProjectId = props.scopeProjectId ?? selectedProjectId;
   const projectPage = usePluginData<ProjectPageData>('sync.projectPage', {
     companyId,
@@ -313,10 +314,8 @@ export function useSyncCenterController(props: {
 
   useEffect(() => {
     const nextSelectedProviderId = projectPage.data?.selectedProviderId ?? '';
-    if (nextSelectedProviderId !== selectedProviderId) {
-      setSelectedProviderId(nextSelectedProviderId);
-    }
-  }, [projectPage.data?.selectedProviderId, selectedProviderId]);
+    setSelectedProviderId((current) => current === nextSelectedProviderId ? current : nextSelectedProviderId);
+  }, [projectPage.data?.selectedProviderId]);
 
   useEffect(() => {
     const nextProjectPage = projectPage.data;
@@ -732,7 +731,7 @@ export function useSyncCenterController(props: {
         tone: 'success'
       });
       await refreshSyncData();
-      setCurrentPage('providers');
+      returnFromProviderDetail();
     } catch (error) {
       setLocalResult({
         message: error instanceof Error ? error.message : 'Could not save provider.',
@@ -768,9 +767,8 @@ export function useSyncCenterController(props: {
         message: 'Removed provider.',
         tone: 'success'
       });
-      setSelectedProviderDetailId(null);
-      setCurrentPage('providers');
       await refreshSyncData();
+      returnFromProviderDetail();
     } catch (error) {
       setLocalResult({
         message: error instanceof Error ? error.message : 'Could not remove provider.',
@@ -848,32 +846,49 @@ export function useSyncCenterController(props: {
 
   function openProviderDirectoryPage() {
     setProviderDraft(null);
+    setProviderDraftToken('');
+    setProviderDraftSourceKey(null);
     setSelectedProviderDetailId(null);
+    setProviderReturnPage('providers');
     setCurrentPage('providers');
   }
 
-  function openCreateProviderPage() {
+  function openCreateProviderPage(returnPage: SyncPageId = 'providers') {
     setProviderDraft(createEmptyProviderDraft(newProviderType));
     setProviderDraftToken('');
     setProviderDraftSourceKey(`new:${newProviderType}`);
     setSelectedProviderDetailId(null);
+    setProviderReturnPage(returnPage);
     setCurrentPage('provider-detail');
   }
 
-  function openProviderDetailPage(providerId?: string) {
+  function openProviderDetailPage(providerId?: string, returnPage: SyncPageId = 'providers') {
     if (providerId) {
       setProviderDraft(null);
     }
     setProviderDraftSourceKey(null);
     setSelectedProviderDetailId(providerId ?? null);
+    setProviderReturnPage(returnPage);
     setCurrentPage('provider-detail');
+  }
+
+  function returnFromProviderDetail() {
+    setProviderDraft(null);
+    setProviderDraftToken('');
+    setProviderDraftSourceKey(null);
+    setSelectedProviderDetailId(null);
+    setCurrentPage(providerReturnPage === 'project' && activeProjectId ? 'project' : 'providers');
   }
 
   const headerTitle =
     currentPage === 'projects'
       ? (props.embeddedTitle ?? 'External Issue Sync')
       : currentPage === 'project'
-        ? (projectPage.data?.projectName ?? activeProject?.projectName ?? 'Project Sync')
+        ? (
+            (projectPage.data?.projectName ?? activeProject?.projectName)
+              ? `External Issue Sync for ${projectPage.data?.projectName ?? activeProject?.projectName}`
+              : 'External Issue Sync'
+          )
         : currentPage === 'providers'
           ? (props.embeddedTitle ?? 'Providers')
           : providerDetail.data?.mode === 'edit'
@@ -883,7 +898,7 @@ export function useSyncCenterController(props: {
     currentPage === 'projects'
       ? 'Choose a Paperclip project first, then configure sync inside that dedicated project page.'
       : currentPage === 'project'
-        ? 'Provider selection comes first. Project-specific sync settings appear only after a provider is chosen.'
+        ? null
         : currentPage === 'providers'
           ? 'Manage reusable upstream providers separately from individual project sync settings.'
           : 'Use the same modal shell with Back navigation instead of stacking nested popups.';
@@ -1028,6 +1043,7 @@ export function useSyncCenterController(props: {
     openProviderDirectoryPage,
     openCreateProviderPage,
     openProviderDetailPage,
+    returnFromProviderDetail,
     openCreateMappingModal,
     openEditMappingModal,
     saveMappingModal

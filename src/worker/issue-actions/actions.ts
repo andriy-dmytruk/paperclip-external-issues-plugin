@@ -26,7 +26,7 @@ import {
 import { getLinkIdentityMetadata } from '../sync/reconcile.ts';
 import {
   findCommentLinkEntity,
-  findOrRecoverLinkedIssueEntity,
+  findLinkedIssueEntity,
   upsertCommentLinkEntity,
   upsertIssueLinkEntity
 } from '../sync/link-repository.ts';
@@ -61,7 +61,7 @@ async function loadIssueActionContext(
   const settings = await loadNormalizedState(ctx, SETTINGS_SCOPE, normalizeSettings);
   const projectConfig = await resolveProjectConfigForIssue(ctx, settings, companyId, issueId);
   const mapping = await resolveMappingForIssue(ctx, settings, companyId, issueId);
-  const link = await findOrRecoverLinkedIssueEntity(ctx, settings, companyId, issueId);
+  const link = await findLinkedIssueEntity(ctx, issueId);
   return { settings, projectConfig, mapping, link };
 }
 
@@ -147,10 +147,7 @@ export async function pushIssueToUpstream(
     projectId: issue.projectId ?? projectConfig.projectId ?? mapping.paperclipProjectId,
     providerId: projectConfig.providerId,
     ...getLinkIdentityMetadata({
-      providerType,
-      jiraProjectKey: mapping.jiraProjectKey,
-      jiraIssueId: upstreamIssue.id,
-      jiraIssueKey: upstreamIssue.key
+      uniqueUpstreamId: upstreamIssue.uniqueUpstreamId
     }),
     jiraIssueId: upstreamIssue.id,
     jiraIssueKey: upstreamIssue.key,
@@ -324,15 +321,12 @@ export async function setUpstreamIssueStatus(
 
   const providerType = link.providerId ?? mapping?.providerId
     ? await getProviderTypeById(ctx, link.providerId ?? mapping?.providerId)
-    : link.upstreamProviderType ?? 'jira_dc';
+    : 'jira_dc';
   await upsertIssueLinkEntity(ctx, issueId, {
     ...link,
     ...(link.providerId ?? mapping?.providerId ? { providerId: link.providerId ?? mapping?.providerId } : {}),
     ...getLinkIdentityMetadata({
-      providerType,
-      jiraProjectKey: link.jiraProjectKey,
-      jiraIssueId: reloadedIssue.id,
-      jiraIssueKey: reloadedIssue.key
+      uniqueUpstreamId: reloadedIssue.uniqueUpstreamId
     }),
     ...(reloadedIssue.assigneeDisplayName ? { jiraAssigneeDisplayName: reloadedIssue.assigneeDisplayName } : {}),
     ...(reloadedIssue.creatorDisplayName ? { jiraCreatorDisplayName: reloadedIssue.creatorDisplayName } : {}),
@@ -375,15 +369,12 @@ export async function setUpstreamIssueAssignee(
 
   const providerType = link.providerId ?? mapping?.providerId
     ? await getProviderTypeById(ctx, link.providerId ?? mapping?.providerId)
-    : link.upstreamProviderType ?? 'jira_dc';
+    : 'jira_dc';
   await upsertIssueLinkEntity(ctx, issueId, {
     ...link,
     ...(link.providerId ?? mapping?.providerId ? { providerId: link.providerId ?? mapping?.providerId } : {}),
     ...getLinkIdentityMetadata({
-      providerType,
-      jiraProjectKey: link.jiraProjectKey,
-      jiraIssueId: reloadedIssue.id,
-      jiraIssueKey: reloadedIssue.key
+      uniqueUpstreamId: reloadedIssue.uniqueUpstreamId
     }),
     ...(reloadedIssue.assigneeDisplayName ? { jiraAssigneeDisplayName: reloadedIssue.assigneeDisplayName } : {}),
     ...(reloadedIssue.creatorDisplayName ? { jiraCreatorDisplayName: reloadedIssue.creatorDisplayName } : {}),

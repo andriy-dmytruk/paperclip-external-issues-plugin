@@ -13,7 +13,6 @@ import {
   badgeStyle,
   buttonLabel,
   buttonStyle,
-  cardStyle,
   inputStyle,
   pageCardStyle,
   providerLabel,
@@ -54,78 +53,75 @@ export function SyncCenterSurface(props: {
   embeddedTitle?: string;
   modal?: boolean;
   settingsOnly?: boolean;
+  hideHeader?: boolean;
 }): React.JSX.Element {
   const controller = useSyncCenterController(props);
+  const showBackButton =
+    (controller.currentPage === 'project' && (!props.scopeProjectId || controller.entryContext.data?.requiresProjectSelection))
+    || (controller.currentPage === 'providers' && !props.settingsOnly)
+    || controller.currentPage === 'provider-detail';
 
   return (
-    <section style={{
-      ...(props.modal
-        ? {
-            ...cardStyle(),
-            width: 'min(100%, 980px)',
-            maxHeight: 'min(82vh, 980px)',
-            overflowY: 'auto',
-            padding: 18
-          }
-        : {})
-    }}
-    >
-      <div style={stackStyle(16)}>
-        <div style={rowStyle()}>
-          <div style={{ display: 'grid', gap: 4, flex: '1 1 260px' }}>
-            <h3 style={{ margin: 0 }}>{controller.headerTitle}</h3>
-            <span style={{ fontSize: 13, opacity: 0.78 }}>
-              {controller.headerSubtitle}
-            </span>
+    <section>
+      <div style={stackStyle(props.modal ? 18 : 16)}>
+        {!props.hideHeader ? (
+          <div style={{ ...rowStyle(), alignItems: 'flex-start', justifyContent: 'space-between' }}>
+            <div style={{ display: 'grid', gap: 6, flex: '1 1 260px', minWidth: 0 }}>
+              <h3 style={{ margin: 0, fontSize: props.modal ? 18 : 22, lineHeight: 1.2, fontWeight: 600 }}>
+                {controller.headerTitle}
+              </h3>
+              {controller.headerSubtitle ? (
+                <span style={{ fontSize: props.modal ? 14 : 13, opacity: 0.74, maxWidth: props.modal ? 780 : undefined }}>
+                  {controller.headerSubtitle}
+                </span>
+              ) : null}
+            </div>
           </div>
-          {controller.currentPage === 'project' && controller.activeProject ? (
-            <span style={badgeStyle(controller.activeProject.isConfigured ? 'synced' : 'local')}>
-              {controller.activeProject.isConfigured ? 'Configured' : 'Needs provider'}
-            </span>
-          ) : null}
-        </div>
+        ) : null}
 
-        <div style={rowStyle()}>
-          {controller.currentPage === 'project' && (!props.scopeProjectId || controller.entryContext.data?.requiresProjectSelection) ? (
-            <button
-              type="button"
-              style={buttonStyle()}
-              onClick={() => controller.setCurrentPage('projects')}
-            >
-              {buttonLabel('back', 'Back')}
-            </button>
-          ) : null}
-          {controller.currentPage === 'providers' && !props.settingsOnly ? (
-            <button
-              type="button"
-              style={buttonStyle()}
-              onClick={() => controller.setCurrentPage(
-                controller.activeProjectId
-                  ? 'project'
-                  : resolveInitialSyncPage(controller.entryContext.data ?? {
-                      surface: 'global',
-                      requiresProjectSelection: true
-                    })
-              )}
-            >
-              {buttonLabel('back', 'Back')}
-            </button>
-          ) : null}
-          {controller.currentPage === 'provider-detail' ? (
-            <button
-              type="button"
-              style={buttonStyle()}
-              onClick={() => controller.openProviderDirectoryPage()}
-            >
-              {buttonLabel('back', 'Back')}
-            </button>
-          ) : null}
-        </div>
+        {showBackButton ? (
+          <div style={rowStyle()}>
+            {controller.currentPage === 'project' && (!props.scopeProjectId || controller.entryContext.data?.requiresProjectSelection) ? (
+              <button
+                type="button"
+                style={buttonStyle()}
+                onClick={() => controller.setCurrentPage('projects')}
+              >
+                {buttonLabel('back', 'Back')}
+              </button>
+            ) : null}
+            {controller.currentPage === 'providers' && !props.settingsOnly ? (
+              <button
+                type="button"
+                style={buttonStyle()}
+                onClick={() => controller.setCurrentPage(
+                  controller.activeProjectId
+                    ? 'project'
+                    : resolveInitialSyncPage(controller.entryContext.data ?? {
+                        surface: 'global',
+                        requiresProjectSelection: true
+                      })
+                )}
+              >
+                {buttonLabel('back', 'Back')}
+              </button>
+            ) : null}
+            {controller.currentPage === 'provider-detail' ? (
+              <button
+                type="button"
+                style={buttonStyle()}
+                onClick={() => controller.returnFromProviderDetail()}
+              >
+                {buttonLabel('back', 'Back')}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
 
         <ResultMessage message={controller.message} tone={controller.messageTone} />
 
         {controller.currentPage === 'projects' ? (
-          <div style={stackStyle(12)}>
+          <div style={stackStyle(10)}>
             {(controller.projectList.data?.projects ?? []).length === 0 ? (
               <div style={sectionCardStyle()}>
                 No Paperclip projects are available for sync yet.
@@ -177,8 +173,8 @@ export function SyncCenterSurface(props: {
               activeProjectId={controller.activeProjectId}
               saveProjectBusy={controller.saveProject.busy}
               onProviderSelection={(providerId) => { void controller.handleProviderSelection(providerId); }}
-              onCreateProvider={controller.openCreateProviderPage}
-              onEditProvider={() => controller.openProviderDetailPage(controller.selectedProvider?.id)}
+              onCreateProvider={() => controller.openCreateProviderPage('project')}
+              onEditProvider={() => controller.openProviderDetailPage(controller.selectedProvider?.id, 'project')}
               onDisableSync={() => { void controller.handleDisableSync(); }}
             />
 
@@ -287,25 +283,30 @@ export function SyncCenterSurface(props: {
                     setStatusMappings={(updater) => controller.setStatusMappings(updater)}
                   />
                 ) : null}
-
-                <ProjectSyncActionsSection
-                  sectionCardStyle={sectionCardStyle}
-                  rowStyle={rowStyle}
-                  buttonStyle={buttonStyle}
-                  buttonLabel={buttonLabel}
-                  activeProjectId={controller.activeProjectId}
-                  saveProjectBusy={controller.saveProject.busy}
-                  configSaving={controller.configSaving}
-                  runSyncBusy={controller.runSync.busy}
-                  cleanupBusy={controller.cleanupCandidates.busy}
-                  onSave={() => { void controller.persistProjectSettings(); }}
-                  onRunSync={() => { void controller.handleRunSync(); }}
-                  onCleanup={() => { void controller.handleCleanup(); }}
-                />
-
-                <SyncProgressPanel syncProgress={controller.projectPage.data?.syncProgress} />
               </>
             ) : null}
+
+            {controller.providerEnabled ? (
+              <ProjectSyncActionsSection
+                rowStyle={rowStyle}
+                buttonStyle={buttonStyle}
+                buttonLabel={buttonLabel}
+                activeProjectId={controller.activeProjectId}
+                saveProjectBusy={controller.saveProject.busy}
+                configSaving={controller.configSaving}
+                runSyncBusy={controller.runSync.busy}
+                cleanupBusy={controller.cleanupCandidates.busy}
+                onSave={() => { void controller.persistProjectSettings(); }}
+                onRunSync={() => { void controller.handleRunSync(); }}
+                onCleanup={() => { void controller.handleCleanup(); }}
+              />
+            ) : null}
+
+            <SyncProgressPanel
+              syncProgress={controller.projectPage.data?.syncProgress}
+              pending={controller.runSync.busy}
+              pendingLabel={controller.configSaving ? 'Saving settings before sync…' : 'Sync is running…'}
+            />
           </div>
         ) : null}
 
@@ -331,6 +332,7 @@ export function SyncCenterSurface(props: {
             setProviderDraft={controller.setProviderDraft}
             setProviderDraftToken={controller.setProviderDraftToken}
             setSelectedProviderDetailId={controller.setSelectedProviderDetailId}
+            openCreateProviderPage={() => controller.openCreateProviderPage('providers')}
             openProviderDetailPage={controller.openProviderDetailPage}
           />
         ) : null}

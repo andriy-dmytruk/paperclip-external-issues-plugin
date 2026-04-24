@@ -1,5 +1,5 @@
 import React from 'react';
-import { badgeStyle } from '../../primitives.js';
+import { badgeStyle, tabButtonStyle as baseTabButtonStyle, tabListStyle as baseTabListStyle } from '../../primitives.js';
 import { isGitHubProviderType } from '../../../providers/shared/config.ts';
 import type { MappingRow } from '../../types.js';
 import type { ProviderType } from '../../plugin-config.js';
@@ -49,24 +49,11 @@ export function metricCardStyle(): React.CSSProperties {
 }
 
 export function tabListStyle(): React.CSSProperties {
-  return {
-    display: 'flex',
-    gap: 8,
-    flexWrap: 'wrap'
-  };
+  return baseTabListStyle();
 }
 
 export function tabButtonStyle(selected = false): React.CSSProperties {
-  return {
-    borderRadius: 999,
-    padding: '7px 12px',
-    border: '1px solid var(--border)',
-    background: selected ? 'color-mix(in srgb, currentColor 8%, transparent)' : 'transparent',
-    color: 'inherit',
-    cursor: 'pointer',
-    fontSize: 13,
-    fontWeight: selected ? 600 : 500
-  };
+  return baseTabButtonStyle(selected);
 }
 
 export function healthBadgeStyle(status?: string | null): React.CSSProperties {

@@ -20,8 +20,8 @@ test('sync.findCleanupCandidates includes legacy untouched Jira imports across l
     issues: [
       makeIssue({
         id: 'issue-legacy-import',
-        title: '[GRB-777] Legacy imported Jira issue',
-        description: 'Imported body\n\n<!-- paperclip-external-issues-plugin-upstream: GRB-777 -->',
+        title: '[PRJ-777] Legacy imported Jira issue',
+        description: 'Imported body\n\n<!-- paperclip-external-issues-plugin-upstream: PRJ-777 -->',
         status: 'backlog'
       })
     ]
@@ -33,7 +33,7 @@ test('sync.findCleanupCandidates includes legacy untouched Jira imports across l
     mappings: [
       {
         providerId: 'provider-default-jira',
-        jiraProjectKey: 'GRB',
+        jiraProjectKey: 'PRJ',
         paperclipProjectId: 'project-1',
         paperclipProjectName: 'Alpha'
       }
@@ -44,17 +44,17 @@ test('sync.findCleanupCandidates includes legacy untouched Jira imports across l
     entityType: 'paperclip-external-issues-plugin.issue-link',
     scopeKind: 'issue',
     scopeId: 'issue-legacy-import',
-    externalId: 'GRB-777',
-    title: 'GRB-777',
+    externalId: 'PRJ-777',
+    title: 'PRJ-777',
     status: 'Backlog',
     data: {
       issueId: 'issue-legacy-import',
       companyId: 'company-1',
       projectId: 'project-1',
       jiraIssueId: '10077',
-      jiraIssueKey: 'GRB-777',
-      jiraProjectKey: 'GRB',
-      jiraUrl: 'https://jira.example.com/browse/GRB-777',
+      jiraIssueKey: 'PRJ-777',
+      jiraProjectKey: 'PRJ',
+      jiraUrl: 'https://jira.example.com/browse/PRJ-777',
       jiraStatusName: 'Backlog',
       jiraStatusCategory: 'To Do',
       lastSyncedAt: '2026-04-21T13:08:38.000Z',
@@ -72,7 +72,7 @@ test('sync.findCleanupCandidates includes legacy untouched Jira imports across l
 
   assert.equal(result.count, 1);
   assert.equal(result.candidates[0]?.issueId, 'issue-legacy-import');
-  assert.equal(result.candidates[0]?.jiraIssueKey, 'GRB-777');
+  assert.equal(result.candidates[0]?.jiraIssueKey, 'PRJ-777');
   assert.equal(result.candidates[0]?.status, 'backlog');
 });
 
@@ -91,8 +91,8 @@ test('sync.findCleanupCandidates ignores hidden imported issues', async () => {
     issues: [
       makeIssue({
         id: 'issue-hidden-import',
-        title: '[GRB-778] Hidden imported Jira issue',
-        description: 'Imported body\n\n<!-- paperclip-external-issues-plugin-upstream: GRB-778 -->',
+        title: '[PRJ-778] Hidden imported Jira issue',
+        description: 'Imported body\n\n<!-- paperclip-external-issues-plugin-upstream: PRJ-778 -->',
         hidden: true,
         status: 'backlog'
       })
@@ -103,17 +103,17 @@ test('sync.findCleanupCandidates ignores hidden imported issues', async () => {
     entityType: 'paperclip-external-issues-plugin.issue-link',
     scopeKind: 'issue',
     scopeId: 'issue-hidden-import',
-    externalId: 'GRB-778',
-    title: 'GRB-778',
+    externalId: 'PRJ-778',
+    title: 'PRJ-778',
     status: 'Backlog',
     data: {
       issueId: 'issue-hidden-import',
       companyId: 'company-1',
       projectId: 'project-1',
       jiraIssueId: '10078',
-      jiraIssueKey: 'GRB-778',
-      jiraProjectKey: 'GRB',
-      jiraUrl: 'https://jira.example.com/browse/GRB-778',
+      jiraIssueKey: 'PRJ-778',
+      jiraProjectKey: 'PRJ',
+      jiraUrl: 'https://jira.example.com/browse/PRJ-778',
       jiraStatusName: 'Backlog',
       jiraStatusCategory: 'To Do',
       lastSyncedAt: '2026-04-21T13:08:38.000Z',
@@ -148,8 +148,8 @@ test('sync.cleanupImportedIssues accepts selected issues without mutating issue 
     issues: [
       makeIssue({
         id: 'issue-cleanup-import',
-        title: '[GRB-779] Cleanup imported Jira issue',
-        description: 'Imported body\n\n<!-- paperclip-external-issues-plugin-upstream: GRB-779 -->',
+        title: '[PRJ-779] Cleanup imported Jira issue',
+        description: 'Imported body\n\n<!-- paperclip-external-issues-plugin-upstream: PRJ-779 -->',
         hiddenAt: null,
         status: 'backlog'
       })
@@ -160,17 +160,17 @@ test('sync.cleanupImportedIssues accepts selected issues without mutating issue 
     entityType: 'paperclip-external-issues-plugin.issue-link',
     scopeKind: 'issue',
     scopeId: 'issue-cleanup-import',
-    externalId: 'GRB-779',
-    title: 'GRB-779',
+    externalId: 'PRJ-779',
+    title: 'PRJ-779',
     status: 'Backlog',
     data: {
       issueId: 'issue-cleanup-import',
       companyId: 'company-1',
       projectId: 'project-1',
       jiraIssueId: '10079',
-      jiraIssueKey: 'GRB-779',
-      jiraProjectKey: 'GRB',
-      jiraUrl: 'https://jira.example.com/browse/GRB-779',
+      jiraIssueKey: 'PRJ-779',
+      jiraProjectKey: 'PRJ',
+      jiraUrl: 'https://jira.example.com/browse/PRJ-779',
       jiraStatusName: 'Backlog',
       jiraStatusCategory: 'To Do',
       lastSyncedAt: '2026-04-21T13:08:38.000Z',

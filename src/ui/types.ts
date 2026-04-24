@@ -66,6 +66,7 @@ export type ProjectToolbarState = {
   providerType?: ProviderType | null;
   providerName?: string | null;
   projectId?: string;
+  projectName?: string | null;
 };
 
 export type IssueSyncPresentation = {

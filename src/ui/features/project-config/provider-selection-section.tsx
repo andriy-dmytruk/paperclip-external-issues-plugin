@@ -35,20 +35,19 @@ export function ProjectProviderSelectionSection(props: {
             </span>
           ) : null}
         </div>
-        <div style={props.stackStyle(6)}>
-          <span style={{ fontSize: 13, fontWeight: 600 }}>Saved provider</span>
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto auto', gap: 8, alignItems: 'end' }}>
-            <select
-              style={props.inputStyle()}
-              value={props.selectedProviderId}
-              disabled={!props.activeProjectId}
-              onChange={(event) => props.onProviderSelection(event.target.value)}
-            >
-              <option value="">None</option>
-              {props.configuredProviders.map((provider) => (
-                <option key={provider.id} value={provider.id}>{provider.name || 'Untitled provider'}</option>
-              ))}
-            </select>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+          <select
+            style={{ ...props.inputStyle(), flex: '1 1 280px', minWidth: 220 }}
+            value={props.selectedProviderId}
+            disabled={!props.activeProjectId}
+            onChange={(event) => props.onProviderSelection(event.target.value)}
+          >
+            <option value="">None</option>
+            {props.configuredProviders.map((provider) => (
+              <option key={provider.id} value={provider.id}>{provider.name || 'Untitled provider'}</option>
+            ))}
+          </select>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button
               type="button"
               style={props.buttonStyle()}

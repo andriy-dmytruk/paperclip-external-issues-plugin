@@ -35,7 +35,6 @@ export function ProviderDisabledCleanupSection(props: {
 }
 
 export function ProjectSyncActionsSection(props: {
-  sectionCardStyle: () => React.CSSProperties;
   rowStyle: () => React.CSSProperties;
   buttonStyle: (tone?: 'primary' | 'secondary' | 'success') => React.CSSProperties;
   buttonLabel: (icon: any, label: string) => React.JSX.Element;
@@ -49,36 +48,31 @@ export function ProjectSyncActionsSection(props: {
   onCleanup: () => void;
 }): React.JSX.Element {
   return (
-    <div style={{ ...props.sectionCardStyle(), display: 'grid', gap: 10 }}>
-      <div style={{ fontSize: 12, opacity: 0.72 }}>
-        Sync saves this project’s settings first and then runs against the currently selected provider.
-      </div>
-      <div style={props.rowStyle()}>
-        <button
-          type="button"
-          style={props.buttonStyle('primary')}
-          disabled={!props.activeProjectId || props.saveProjectBusy || props.configSaving}
-          onClick={props.onSave}
-        >
-          {props.buttonLabel('save', props.saveProjectBusy || props.configSaving ? 'Saving…' : 'Save settings')}
-        </button>
-        <button
-          type="button"
-          style={props.buttonStyle('success')}
-          disabled={!props.activeProjectId || props.runSyncBusy || props.saveProjectBusy || props.configSaving}
-          onClick={props.onRunSync}
-        >
-          {props.buttonLabel('sync', props.runSyncBusy ? 'Syncing…' : 'Sync issues')}
-        </button>
-        <button
-          type="button"
-          style={props.buttonStyle()}
-          disabled={!props.activeProjectId || props.cleanupBusy || props.saveProjectBusy}
-          onClick={props.onCleanup}
-        >
-          {props.buttonLabel('hide', props.cleanupBusy ? 'Preparing…' : 'Hide imported issues')}
-        </button>
-      </div>
+    <div style={{ ...props.rowStyle(), gap: 10 }}>
+      <button
+        type="button"
+        style={props.buttonStyle('primary')}
+        disabled={!props.activeProjectId || props.saveProjectBusy || props.configSaving}
+        onClick={props.onSave}
+      >
+        {props.buttonLabel('save', props.saveProjectBusy || props.configSaving ? 'Saving…' : 'Save settings')}
+      </button>
+      <button
+        type="button"
+        style={props.buttonStyle('success')}
+        disabled={!props.activeProjectId || props.runSyncBusy || props.saveProjectBusy || props.configSaving}
+        onClick={props.onRunSync}
+      >
+        {props.buttonLabel('sync', props.runSyncBusy ? 'Syncing…' : 'Sync issues')}
+      </button>
+      <button
+        type="button"
+        style={props.buttonStyle()}
+        disabled={!props.activeProjectId || props.cleanupBusy || props.saveProjectBusy}
+        onClick={props.onCleanup}
+      >
+        {props.buttonLabel('hide', props.cleanupBusy ? 'Preparing…' : 'Hide imported issues')}
+      </button>
     </div>
   );
 }

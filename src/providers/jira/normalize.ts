@@ -10,6 +10,18 @@ interface NormalizeJiraDeps {
   defaultIssueType: string;
 }
 
+function buildJiraUniqueUpstreamId(baseUrl: string | undefined, issueId: string): string {
+  const normalizedIssueId = issueId.trim();
+  const fallbackBase = (baseUrl ?? 'jira').trim().replace(/\/+$/, '');
+  try {
+    const parsed = new URL(fallbackBase);
+    const normalizedBase = `${parsed.protocol}//${parsed.host.toLowerCase()}${parsed.pathname.replace(/\/+$/, '')}`;
+    return `jira:${normalizedBase}:${normalizedIssueId}`;
+  } catch {
+    return `jira:${fallbackBase.toLowerCase()}:${normalizedIssueId}`;
+  }
+}
+
 function normalizeJiraStatusCategory(value: unknown): string {
   if (!value || typeof value !== 'object') {
     return 'To Do';
@@ -121,6 +133,7 @@ export function normalizeJiraIssue(
   return {
     id,
     key,
+    uniqueUpstreamId: buildJiraUniqueUpstreamId(config.baseUrl, id),
     summary,
     description,
     ...(assigneeDisplayName ? { assigneeDisplayName } : {}),

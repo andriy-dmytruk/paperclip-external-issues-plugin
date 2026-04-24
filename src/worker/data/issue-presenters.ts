@@ -1,11 +1,11 @@
-import type { Issue } from '@paperclipai/plugin-sdk';
 import { SETTINGS_SCOPE, COMMENT_LINKS_STATE_KEY } from '../core/defaults.ts';
 import { loadNormalizedState } from '../core/state.ts';
 import { getProjectConfig, normalizeSettings } from '../core/settings-runtime.ts';
-import { shouldPresentIssueLink, getProviderPlatformName } from '../sync/helpers.ts';
+import { getProviderPlatformName } from '../sync/helpers.ts';
+import type { UpstreamIssueLinkData } from '../core/models.ts';
 import {
   findCommentLinkEntity,
-  findOrRecoverLinkedIssueEntity,
+  findLinkedIssueEntity,
   upsertIssueLinkEntity
 } from '../sync/link-repository.ts';
 import { resolveMappingForIssue } from '../sync/project-resolution.ts';
@@ -17,8 +17,7 @@ import {
 import {
   providerConfigResolver,
   providerRegistry,
-  type PluginSetupContext,
-  type UpstreamIssueLinkData
+  type PluginSetupContext
 } from '../core/context.ts';
 import { isConfigReady, isGitHubConfigReady } from './provider-status.ts';
 
@@ -37,8 +36,7 @@ export async function buildIssueSyncPresentation(
 
   const projectConfig = issue.projectId ? getProjectConfig(settings, companyId, issue.projectId) : null;
   const mapping = await resolveMappingForIssue(ctx, settings, companyId, issueId);
-  const rawLink = await findOrRecoverLinkedIssueEntity(ctx, settings, companyId, issueId);
-  const link = shouldPresentIssueLink(issue as Issue, rawLink as UpstreamIssueLinkData | null) ? rawLink : null;
+  const link = await findLinkedIssueEntity(ctx, issueId);
   let liveIssue: AnyRecord | null = null;
   const providerType = link?.providerId
     ? (await providerConfigResolver.getProviderDisplayConfig(ctx, link.providerId)).providerType
@@ -66,6 +64,7 @@ export async function buildIssueSyncPresentation(
           liveIssue = refreshedIssue;
           const refreshedLink: AnyRecord = {
             ...link,
+            uniqueUpstreamId: refreshedIssue.uniqueUpstreamId,
             jiraIssueId: refreshedIssue.id,
             jiraIssueKey: refreshedIssue.key,
             jiraProjectKey: link.jiraProjectKey,
@@ -162,7 +161,7 @@ export async function buildCommentAnnotationData(
   commentId: string
 ): Promise<AnyRecord> {
   const settings = await loadNormalizedState(ctx, SETTINGS_SCOPE, normalizeSettings);
-  const link = await findOrRecoverLinkedIssueEntity(ctx, settings, companyId, issueId);
+  const link = await findLinkedIssueEntity(ctx, issueId);
   if (!link) {
     return { visible: false };
   }

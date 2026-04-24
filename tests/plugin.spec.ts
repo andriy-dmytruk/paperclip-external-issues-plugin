@@ -22,7 +22,7 @@ test('sync.runNow imports Jira issues into mapped Paperclip projects', async () 
         issues: [
           {
             id: '10001',
-            key: 'GRB-461',
+            key: 'PRJ-461',
             fields: {
               summary: 'Imported from Jira',
               description: {
@@ -98,7 +98,7 @@ test('sync.runNow imports Jira issues into mapped Paperclip projects', async () 
       ],
       mappings: [
         {
-          jiraProjectKey: 'GRB',
+          jiraProjectKey: 'PRJ',
           paperclipProjectId: 'project-1',
           paperclipProjectName: 'Alpha'
         }
@@ -125,7 +125,7 @@ test('sync.runNow imports Jira issues into mapped Paperclip projects', async () 
     assert.equal(syncState.status, 'success');
     assert.equal(syncState.importedCount, 1);
     assert.equal(importedIssues.length, 1);
-    assert.match(importedIssues[0]?.description ?? '', /paperclip-external-issues-plugin-upstream: GRB-461/);
+    assert.match(importedIssues[0]?.description ?? '', /paperclip-external-issues-plugin-upstream: PRJ-461/);
     assert.equal(importedIssues[0]?.status, 'todo');
     assert.equal(providerDirectory.providers[0]?.status, 'connected');
     assert.equal(providerDirectory.providers[0]?.healthLabel, 'Connected');
@@ -171,7 +171,7 @@ test('sync.runNow marks provider health as degraded when upstream search fails',
       providerId: 'provider-default-jira',
       mappings: [
         {
-          jiraProjectKey: 'GRB',
+          jiraProjectKey: 'PRJ',
           paperclipProjectId: 'project-1',
           paperclipProjectName: 'Alpha'
         }
@@ -204,7 +204,7 @@ test('sync.runNow recreates a hidden imported Jira issue when it reappears upstr
         issues: [
           {
             id: '10001',
-            key: 'GRB-461',
+            key: 'PRJ-461',
             fields: {
               summary: 'Imported from Jira',
               description: {
@@ -261,8 +261,8 @@ test('sync.runNow recreates a hidden imported Jira issue when it reappears upstr
         makeIssue({
           id: 'issue-hidden-sync',
           projectId: 'project-1',
-          title: '[GRB-461] Imported from Jira',
-          description: 'Remote body\n\n<!-- paperclip-external-issues-plugin-upstream: GRB-461 -->',
+          title: '[PRJ-461] Imported from Jira',
+          description: 'Remote body\n\n<!-- paperclip-external-issues-plugin-upstream: PRJ-461 -->',
           hiddenAt: new Date('2026-04-21T00:00:00.000Z')
         })
       ]
@@ -283,7 +283,7 @@ test('sync.runNow recreates a hidden imported Jira issue when it reappears upstr
       ],
       mappings: [
         {
-          jiraProjectKey: 'GRB',
+          jiraProjectKey: 'PRJ',
           paperclipProjectId: 'project-1',
           paperclipProjectName: 'Alpha'
         }
@@ -294,17 +294,17 @@ test('sync.runNow recreates a hidden imported Jira issue when it reappears upstr
       entityType: 'paperclip-external-issues-plugin.issue-link',
       scopeKind: 'issue',
       scopeId: 'issue-hidden-sync',
-      externalId: 'GRB-461',
-      title: 'GRB-461',
+      externalId: 'PRJ-461',
+      title: 'PRJ-461',
       status: 'Backlog',
       data: {
         issueId: 'issue-hidden-sync',
         companyId: 'company-1',
         projectId: 'project-1',
         jiraIssueId: '10001',
-        jiraIssueKey: 'GRB-461',
-        jiraProjectKey: 'GRB',
-        jiraUrl: 'https://jira.example.com/browse/GRB-461',
+        jiraIssueKey: 'PRJ-461',
+        jiraProjectKey: 'PRJ',
+        jiraUrl: 'https://jira.example.com/browse/PRJ-461',
         jiraStatusName: 'Backlog',
         jiraStatusCategory: 'To Do',
         lastSyncedAt: '2026-04-21T13:08:38.000Z',
@@ -325,14 +325,14 @@ test('sync.runNow recreates a hidden imported Jira issue when it reappears upstr
       companyId: 'company-1',
       projectId: 'project-1'
     });
-    const visibleReplacement = importedIssues.find((issue) => issue.id !== 'issue-hidden-sync' && issue.title === '[GRB-461] Imported from Jira');
+    const visibleReplacement = importedIssues.find((issue) => issue.id !== 'issue-hidden-sync' && issue.title === '[PRJ-461] Imported from Jira');
     const issueLinks = await harness.ctx.entities.list({
       entityType: 'paperclip-external-issues-plugin.issue-link',
       limit: 20
     });
     const newestLinkForKey = issueLinks
       .map((record) => record.data as Record<string, unknown>)
-      .filter((record) => record.jiraIssueKey === 'GRB-461')
+      .filter((record) => record.jiraIssueKey === 'PRJ-461')
       .sort((left, right) => Date.parse(String(right.lastSyncedAt ?? '')) - Date.parse(String(left.lastSyncedAt ?? '')))[0];
 
     assert.equal(syncState.status, 'success');
@@ -353,7 +353,7 @@ test('sync.runNow matches a scoped project even when an older mapping only saved
         issues: [
           {
             id: '10021',
-            key: 'GRB-480',
+            key: 'PRJ-480',
             fields: {
               summary: 'Imported from legacy mapping',
               description: { type: 'doc', version: 1, content: [] },
@@ -397,7 +397,7 @@ test('sync.runNow matches a scoped project even when an older mapping only saved
           {
             id: 'mapping-legacy',
             companyId: 'company-1',
-            jiraProjectKey: 'GRB',
+            jiraProjectKey: 'PRJ',
             paperclipProjectName: 'Alpha'
           }
         ]
@@ -421,7 +421,7 @@ test('sync.runNow matches a scoped project even when an older mapping only saved
     assert.equal(syncState.status, 'success');
     assert.equal(syncState.importedCount, 1);
     assert.equal(importedIssues.length, 1);
-    assert.equal(importedIssues[0]?.title, '[GRB-480] Imported from legacy mapping');
+    assert.equal(importedIssues[0]?.title, '[PRJ-480] Imported from legacy mapping');
   } finally {
     restoreFetch();
   }
@@ -435,7 +435,7 @@ test('sync.runNow applies the default Jira-to-Paperclip status mapping when no e
         issues: [
           {
             id: '10001',
-            key: 'GRB-462',
+            key: 'PRJ-462',
             fields: {
               summary: 'Imported in progress from Jira',
               description: {
@@ -487,7 +487,7 @@ test('sync.runNow applies the default Jira-to-Paperclip status mapping when no e
       companyId: 'company-1',
       mappings: [
         {
-          jiraProjectKey: 'GRB',
+          jiraProjectKey: 'PRJ',
           paperclipProjectId: 'project-1',
           paperclipProjectName: 'Alpha'
         }
@@ -841,7 +841,7 @@ test('sync.runNow applies explicit Jira-to-Paperclip status mappings on imported
         issues: [
           {
             id: '10001',
-            key: 'GRB-463',
+            key: 'PRJ-463',
             fields: {
               summary: searchCalls === 1 ? 'Imported first pass' : 'Updated from Jira',
               description: {
@@ -904,7 +904,7 @@ test('sync.runNow applies explicit Jira-to-Paperclip status mappings on imported
       ],
       mappings: [
         {
-          jiraProjectKey: 'GRB',
+          jiraProjectKey: 'PRJ',
           paperclipProjectId: 'project-1',
           paperclipProjectName: 'Alpha'
         }
@@ -954,7 +954,7 @@ test('sync.runNow re-imports a Jira issue into a newly selected Paperclip projec
         issues: [
           {
             id: '10001',
-            key: 'GRB-461',
+            key: 'PRJ-461',
             fields: {
               summary: 'Imported from Jira',
               description: { type: 'doc', version: 1, content: [] },
@@ -994,8 +994,8 @@ test('sync.runNow re-imports a Jira issue into a newly selected Paperclip projec
         makeIssue({
           id: 'issue-old-project',
           projectId: 'project-1',
-          title: '[GRB-461] Imported from Jira',
-          description: '<!-- paperclip-external-issues-plugin-upstream: GRB-461 -->'
+          title: '[PRJ-461] Imported from Jira',
+          description: '<!-- paperclip-external-issues-plugin-upstream: PRJ-461 -->'
         })
       ]
     });
@@ -1004,17 +1004,17 @@ test('sync.runNow re-imports a Jira issue into a newly selected Paperclip projec
       entityType: 'paperclip-external-issues-plugin.issue-link',
       scopeKind: 'issue',
       scopeId: 'issue-old-project',
-      externalId: 'GRB-461',
-      title: 'GRB-461',
+      externalId: 'PRJ-461',
+      title: 'PRJ-461',
       status: 'Backlog',
       data: {
         issueId: 'issue-old-project',
         companyId: 'company-1',
         projectId: 'project-1',
         jiraIssueId: '10001',
-        jiraIssueKey: 'GRB-461',
-        jiraProjectKey: 'GRB',
-        jiraUrl: 'https://jira.example.com/browse/GRB-461',
+        jiraIssueKey: 'PRJ-461',
+        jiraProjectKey: 'PRJ',
+        jiraUrl: 'https://jira.example.com/browse/PRJ-461',
         jiraStatusName: 'Backlog',
         jiraStatusCategory: 'To Do',
         lastSyncedAt: '2026-04-21T13:08:38.000Z',
@@ -1030,7 +1030,7 @@ test('sync.runNow re-imports a Jira issue into a newly selected Paperclip projec
       scheduleFrequencyMinutes: 15,
       mappings: [
         {
-          jiraProjectKey: 'GRB',
+          jiraProjectKey: 'PRJ',
           paperclipProjectId: 'project-2',
           paperclipProjectName: 'Beta'
         }
@@ -1056,7 +1056,7 @@ test('sync.runNow re-imports a Jira issue into a newly selected Paperclip projec
     assert.equal(syncState.updatedCount, 0);
     assert.equal(projectOneIssues.length, 1);
     assert.equal(projectTwoIssues.length, 1);
-    assert.equal(projectTwoIssues[0]?.title, '[GRB-461] Imported from Jira');
+    assert.equal(projectTwoIssues[0]?.title, '[PRJ-461] Imported from Jira');
   } finally {
     restoreFetch();
   }
@@ -1068,13 +1068,13 @@ test('issue.pushToUpstream creates an upstream issue and stores link metadata', 
     if (url.endsWith('/rest/api/2/issue') && init?.method === 'POST') {
       return jsonResponse({
         id: '10002',
-        key: 'GRB-999'
+        key: 'PRJ-999'
       }, 201);
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-999?fields=summary,description,status,comment,updated,created,issuetype,assignee,creator,reporter')) {
+    if (url.endsWith('/rest/api/2/issue/PRJ-999?fields=summary,description,status,comment,updated,created,issuetype,assignee,creator,reporter')) {
       return jsonResponse({
         id: '10002',
-        key: 'GRB-999',
+        key: 'PRJ-999',
         fields: {
           summary: 'Local Paperclip issue',
           description: {
@@ -1102,7 +1102,7 @@ test('issue.pushToUpstream creates an upstream issue and stores link metadata', 
         }
       });
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-999/transitions')) {
+    if (url.endsWith('/rest/api/2/issue/PRJ-999/transitions')) {
       return jsonResponse({
         transitions: [
           { id: '31', name: 'Done' },
@@ -1148,7 +1148,7 @@ test('issue.pushToUpstream creates an upstream issue and stores link metadata', 
       ],
       mappings: [
         {
-          jiraProjectKey: 'GRB',
+          jiraProjectKey: 'PRJ',
           paperclipProjectId: 'project-1',
           paperclipProjectName: 'Alpha'
         }
@@ -1173,9 +1173,9 @@ test('issue.pushToUpstream creates an upstream issue and stores link metadata', 
       issueId: 'issue-1'
     });
 
-    assert.equal(result.issueKey, 'GRB-999');
+    assert.equal(result.issueKey, 'PRJ-999');
     assert.equal(details.linked, true);
-    assert.equal(details.upstream?.issueKey, 'GRB-999');
+    assert.equal(details.upstream?.issueKey, 'PRJ-999');
   } finally {
     restoreFetch();
   }
@@ -1189,7 +1189,7 @@ test('sync.runNow reports progress counts and prefixes synced issue titles', asy
         issues: [
           {
             id: '10011',
-            key: 'GRB-470',
+            key: 'PRJ-470',
             fields: {
               summary: 'Provider aware import',
               description: { type: 'doc', version: 1, content: [] },
@@ -1240,7 +1240,7 @@ test('sync.runNow reports progress counts and prefixes synced issue titles', asy
       ],
       mappings: [
         {
-          jiraProjectKey: 'GRB',
+          jiraProjectKey: 'PRJ',
           paperclipProjectId: 'project-1',
           paperclipProjectName: 'Alpha'
         }
@@ -1269,7 +1269,7 @@ test('sync.runNow reports progress counts and prefixes synced issue titles', asy
     assert.equal(syncState.processedCount, 1);
     assert.equal(syncState.totalCount, 1);
     assert.equal(syncState.importedCount, 1);
-    assert.equal(importedIssues[0]?.title, '[GRB-470] Provider aware import');
+    assert.equal(importedIssues[0]?.title, '[PRJ-470] Provider aware import');
   } finally {
     restoreFetch();
   }
@@ -1281,13 +1281,13 @@ test('issue sync presentation keeps local and upstream state separate and expose
     if (url.endsWith('/rest/api/2/issue') && init?.method === 'POST') {
       return jsonResponse({
         id: '10002',
-        key: 'GRB-999'
+        key: 'PRJ-999'
       }, 201);
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-999?fields=summary,description,status,comment,updated,created,issuetype,assignee,creator,reporter')) {
+    if (url.endsWith('/rest/api/2/issue/PRJ-999?fields=summary,description,status,comment,updated,created,issuetype,assignee,creator,reporter')) {
       return jsonResponse({
         id: '10002',
-        key: 'GRB-999',
+        key: 'PRJ-999',
         fields: {
           summary: 'Local Paperclip issue',
           description: { type: 'doc', version: 1, content: [] },
@@ -1310,7 +1310,7 @@ test('issue sync presentation keeps local and upstream state separate and expose
         }
       });
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-999/transitions')) {
+    if (url.endsWith('/rest/api/2/issue/PRJ-999/transitions')) {
       return jsonResponse({
         transitions: [
           { id: '31', name: 'Done' },
@@ -1341,7 +1341,7 @@ test('issue sync presentation keeps local and upstream state separate and expose
       companyId: 'company-1',
       mappings: [
         {
-          jiraProjectKey: 'GRB',
+          jiraProjectKey: 'PRJ',
           paperclipProjectId: 'project-1',
           paperclipProjectName: 'Alpha'
         }
@@ -1370,13 +1370,13 @@ test('issue sync presentation keeps local and upstream state separate and expose
 
     assert.equal(presentation.isSynced, true);
     assert.equal(presentation.localStatus, 'blocked');
-    assert.equal(presentation.upstreamIssueKey, 'GRB-999');
-    assert.equal(presentation.titlePrefix, '[GRB-999]');
+    assert.equal(presentation.upstreamIssueKey, 'PRJ-999');
+    assert.equal(presentation.titlePrefix, '[PRJ-999]');
     assert.equal(presentation.upstreamStatus?.name, 'In Progress');
     assert.equal(presentation.upstreamStatus?.category, 'In Progress');
     assert.equal(presentation.upstream?.jiraCreatorDisplayName, 'Issue Creator');
-    assert.equal(presentation.openInProviderUrl, 'https://jira.example.com/browse/GRB-999');
-    assert.equal(reloadedIssue?.title, '[GRB-999] Local Paperclip issue');
+    assert.equal(presentation.openInProviderUrl, 'https://jira.example.com/browse/PRJ-999');
+    assert.equal(reloadedIssue?.title, '[PRJ-999] Local Paperclip issue');
   } finally {
     restoreFetch();
   }
@@ -1389,13 +1389,13 @@ test('issue.setUpstreamAssignee updates the Jira assignee and refreshes upstream
     if (url.endsWith('/rest/api/2/issue') && init?.method === 'POST') {
       return jsonResponse({
         id: '10002',
-        key: 'GRB-999'
+        key: 'PRJ-999'
       }, 201);
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-999?fields=summary,description,status,comment,updated,created,issuetype,assignee,creator,reporter')) {
+    if (url.endsWith('/rest/api/2/issue/PRJ-999?fields=summary,description,status,comment,updated,created,issuetype,assignee,creator,reporter')) {
       return jsonResponse({
         id: '10002',
-        key: 'GRB-999',
+        key: 'PRJ-999',
         fields: {
           summary: 'Local Paperclip issue',
           description: { type: 'doc', version: 1, content: [] },
@@ -1411,11 +1411,11 @@ test('issue.setUpstreamAssignee updates the Jira assignee and refreshes upstream
         }
       });
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-999/assignee') && init?.method === 'PUT') {
+    if (url.endsWith('/rest/api/2/issue/PRJ-999/assignee') && init?.method === 'PUT') {
       assigned = true;
       return new Response(null, { status: 204 });
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-999/transitions')) {
+    if (url.endsWith('/rest/api/2/issue/PRJ-999/transitions')) {
       return jsonResponse({
         transitions: []
       });
@@ -1444,7 +1444,7 @@ test('issue.setUpstreamAssignee updates the Jira assignee and refreshes upstream
       companyId: 'company-1',
       mappings: [
         {
-          jiraProjectKey: 'GRB',
+          jiraProjectKey: 'PRJ',
           paperclipProjectId: 'project-1',
           paperclipProjectName: 'Alpha'
         }
@@ -1596,13 +1596,13 @@ test('issue.setUpstreamStatus transitions the Jira issue and refreshes upstream 
     if (url.endsWith('/rest/api/2/issue') && init?.method === 'POST') {
       return jsonResponse({
         id: '10002',
-        key: 'GRB-999'
+        key: 'PRJ-999'
       }, 201);
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-999?fields=summary,description,status,comment,updated,created,issuetype,assignee,creator,reporter')) {
+    if (url.endsWith('/rest/api/2/issue/PRJ-999?fields=summary,description,status,comment,updated,created,issuetype,assignee,creator,reporter')) {
       return jsonResponse({
         id: '10002',
-        key: 'GRB-999',
+        key: 'PRJ-999',
         fields: {
           summary: 'Local Paperclip issue',
           description: { type: 'doc', version: 1, content: [] },
@@ -1621,7 +1621,7 @@ test('issue.setUpstreamStatus transitions the Jira issue and refreshes upstream 
         }
       });
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-999/transitions') && (!init?.method || init.method === 'GET')) {
+    if (url.endsWith('/rest/api/2/issue/PRJ-999/transitions') && (!init?.method || init.method === 'GET')) {
       return jsonResponse({
         transitions: [
           { id: '31', name: 'Done' },
@@ -1629,7 +1629,7 @@ test('issue.setUpstreamStatus transitions the Jira issue and refreshes upstream 
         ]
       });
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-999/transitions') && init?.method === 'POST') {
+    if (url.endsWith('/rest/api/2/issue/PRJ-999/transitions') && init?.method === 'POST') {
       transitioned = true;
       return new Response(null, { status: 204 });
     }
@@ -1667,7 +1667,7 @@ test('issue.setUpstreamStatus transitions the Jira issue and refreshes upstream 
       ],
       mappings: [
         {
-          jiraProjectKey: 'GRB',
+          jiraProjectKey: 'PRJ',
           paperclipProjectId: 'project-1',
           paperclipProjectName: 'Alpha'
         }
@@ -1712,13 +1712,13 @@ test('issue.setUpstreamStatus tolerates the Paperclip 204 bridge response bug', 
     if (url.endsWith('/rest/api/2/issue') && init?.method === 'POST') {
       return jsonResponse({
         id: '10002',
-        key: 'GRB-999'
+        key: 'PRJ-999'
       }, 201);
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-999?fields=summary,description,status,comment,updated,created,issuetype,assignee,creator,reporter')) {
+    if (url.endsWith('/rest/api/2/issue/PRJ-999?fields=summary,description,status,comment,updated,created,issuetype,assignee,creator,reporter')) {
       return jsonResponse({
         id: '10002',
-        key: 'GRB-999',
+        key: 'PRJ-999',
         fields: {
           summary: 'Local Paperclip issue',
           description: { type: 'doc', version: 1, content: [] },
@@ -1737,14 +1737,14 @@ test('issue.setUpstreamStatus tolerates the Paperclip 204 bridge response bug', 
         }
       });
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-999/transitions') && (!init?.method || init.method === 'GET')) {
+    if (url.endsWith('/rest/api/2/issue/PRJ-999/transitions') && (!init?.method || init.method === 'GET')) {
       return jsonResponse({
         transitions: [
           { id: '31', name: 'Done' }
         ]
       });
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-999/transitions') && init?.method === 'POST') {
+    if (url.endsWith('/rest/api/2/issue/PRJ-999/transitions') && init?.method === 'POST') {
       transitioned = true;
       throw new Error('Response constructor: Invalid response status code 204');
     }
@@ -1771,7 +1771,7 @@ test('issue.setUpstreamStatus tolerates the Paperclip 204 bridge response bug', 
       companyId: 'company-1',
       mappings: [
         {
-          jiraProjectKey: 'GRB',
+          jiraProjectKey: 'PRJ',
           paperclipProjectId: 'project-1',
           paperclipProjectName: 'Alpha'
         }
@@ -1952,14 +1952,14 @@ test('issue.setUpstreamStatus supports GitHub close reasons', async () => {
   }
 });
 
-test('issue sync presentation and upstream status action recover a missing link entity from the Jira marker', async () => {
+test('issue sync presentation and upstream status action do not recover a missing link entity from markers', async () => {
   let transitioned = false;
   const restoreFetch = installMockFetch(async (input, init) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.endsWith('/rest/api/2/issue/GRB-318?fields=summary,description,status,comment,updated,created,issuetype,assignee,creator,reporter')) {
+    if (url.endsWith('/rest/api/2/issue/PRJ-318?fields=summary,description,status,comment,updated,created,issuetype,assignee,creator,reporter')) {
       return jsonResponse({
         id: '10318',
-        key: 'GRB-318',
+        key: 'PRJ-318',
         fields: {
           summary: 'Recovered sync issue',
           description: { type: 'doc', version: 1, content: [] },
@@ -1974,14 +1974,14 @@ test('issue sync presentation and upstream status action recover a missing link 
         }
       });
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-318/transitions') && (!init?.method || init.method === 'GET')) {
+    if (url.endsWith('/rest/api/2/issue/PRJ-318/transitions') && (!init?.method || init.method === 'GET')) {
       return jsonResponse({
         transitions: [
           { id: '31', name: 'Done' }
         ]
       });
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-318/transitions') && init?.method === 'POST') {
+    if (url.endsWith('/rest/api/2/issue/PRJ-318/transitions') && init?.method === 'POST') {
       transitioned = true;
       return new Response(null, { status: 204 });
     }
@@ -2005,8 +2005,8 @@ test('issue sync presentation and upstream status action recover a missing link 
         makeIssue({
           id: 'issue-recover-link',
           projectId: 'project-1',
-          title: '[GRB-318] Recovered sync issue',
-          description: 'Recovered body\n\n<!-- paperclip-external-issues-plugin-upstream: GRB-318 -->'
+          title: '[PRJ-318] Recovered sync issue',
+          description: 'Recovered body\n\n<!-- paperclip-external-issues-plugin-upstream: PRJ-318 -->'
         })
       ]
     });
@@ -2018,7 +2018,7 @@ test('issue sync presentation and upstream status action recover a missing link 
       providerId: 'provider-default-jira',
       mappings: [
         {
-          jiraProjectKey: 'GRB',
+          jiraProjectKey: 'PRJ',
           paperclipProjectId: 'project-1',
           paperclipProjectName: 'Alpha'
         }
@@ -2034,12 +2034,6 @@ test('issue sync presentation and upstream status action recover a missing link 
       issueId: 'issue-recover-link'
     });
 
-    const transitionResult = await harness.performAction<{ message: string }>('issue.setUpstreamStatus', {
-      companyId: 'company-1',
-      issueId: 'issue-recover-link',
-      transitionId: '31'
-    });
-
     const refreshedPresentation = await harness.getData<{
       isSynced: boolean;
       upstreamStatus?: { name: string };
@@ -2048,12 +2042,20 @@ test('issue sync presentation and upstream status action recover a missing link 
       issueId: 'issue-recover-link'
     });
 
-    assert.equal(presentation.isSynced, true);
-    assert.equal(presentation.upstreamIssueKey, 'GRB-318');
-    assert.equal(presentation.upstreamStatus?.name, 'Backlog');
-    assert.match(transitionResult.message, /Updated upstream status to Done/);
-    assert.equal(refreshedPresentation.isSynced, true);
-    assert.equal(refreshedPresentation.upstreamStatus?.name, 'Done');
+    await assert.rejects(
+      async () => await harness.performAction('issue.setUpstreamStatus', {
+        companyId: 'company-1',
+        issueId: 'issue-recover-link',
+        transitionId: '31'
+      }),
+      /not linked to an upstream issue yet/
+    );
+
+    assert.equal(presentation.isSynced, false);
+    assert.equal(presentation.upstreamIssueKey, null);
+    assert.equal(presentation.upstreamStatus, undefined);
+    assert.equal(refreshedPresentation.isSynced, false);
+    assert.equal(refreshedPresentation.upstreamStatus, undefined);
   } finally {
     restoreFetch();
   }
@@ -2075,14 +2077,14 @@ test('issue sync presentation resolves the correct link when the host ignores en
       makeIssue({
         id: 'issue-1',
         projectId: 'project-1',
-        title: '[GRB-161] First imported issue',
-        description: 'Body\n\n<!-- paperclip-external-issues-plugin-upstream: GRB-161 -->'
+        title: '[PRJ-161] First imported issue',
+        description: 'Body\n\n<!-- paperclip-external-issues-plugin-upstream: PRJ-161 -->'
       }),
       makeIssue({
         id: 'issue-2',
         projectId: 'project-1',
-        title: '[GRB-221] Second imported issue',
-        description: 'Body\n\n<!-- paperclip-external-issues-plugin-upstream: GRB-221 -->'
+        title: '[PRJ-221] Second imported issue',
+        description: 'Body\n\n<!-- paperclip-external-issues-plugin-upstream: PRJ-221 -->'
       })
     ]
   });
@@ -2094,7 +2096,7 @@ test('issue sync presentation resolves the correct link when the host ignores en
     providerId: 'provider-default-jira',
     mappings: [
       {
-        jiraProjectKey: 'GRB',
+        jiraProjectKey: 'PRJ',
         paperclipProjectId: 'project-1',
         paperclipProjectName: 'Alpha'
       }
@@ -2105,17 +2107,17 @@ test('issue sync presentation resolves the correct link when the host ignores en
     entityType: 'paperclip-external-issues-plugin.issue-link',
     scopeKind: 'issue',
     scopeId: 'issue-1',
-    externalId: 'GRB-161:issue-1',
-    title: 'GRB-161',
+    externalId: 'PRJ-161:issue-1',
+    title: 'PRJ-161',
     status: 'Backlog',
     data: {
       issueId: 'issue-1',
       companyId: 'company-1',
       projectId: 'project-1',
       jiraIssueId: '10001',
-      jiraIssueKey: 'GRB-161',
-      jiraProjectKey: 'GRB',
-      jiraUrl: 'https://jira.example.com/browse/GRB-161',
+      jiraIssueKey: 'PRJ-161',
+      jiraProjectKey: 'PRJ',
+      jiraUrl: 'https://jira.example.com/browse/PRJ-161',
       jiraStatusName: 'Backlog',
       jiraStatusCategory: 'To Do',
       lastSyncedAt: '2026-04-21T13:08:38.000Z',
@@ -2126,17 +2128,17 @@ test('issue sync presentation resolves the correct link when the host ignores en
     entityType: 'paperclip-external-issues-plugin.issue-link',
     scopeKind: 'issue',
     scopeId: 'issue-2',
-    externalId: 'GRB-221:issue-2',
-    title: 'GRB-221',
+    externalId: 'PRJ-221:issue-2',
+    title: 'PRJ-221',
     status: 'In Progress',
     data: {
       issueId: 'issue-2',
       companyId: 'company-1',
       projectId: 'project-1',
       jiraIssueId: '10002',
-      jiraIssueKey: 'GRB-221',
-      jiraProjectKey: 'GRB',
-      jiraUrl: 'https://jira.example.com/browse/GRB-221',
+      jiraIssueKey: 'PRJ-221',
+      jiraProjectKey: 'PRJ',
+      jiraUrl: 'https://jira.example.com/browse/PRJ-221',
       jiraStatusName: 'In Progress',
       jiraStatusCategory: 'In Progress',
       lastSyncedAt: '2026-04-21T13:08:38.000Z',
@@ -2162,7 +2164,7 @@ test('issue sync presentation resolves the correct link when the host ignores en
   });
 
   assert.equal(presentation.isSynced, true);
-  assert.equal(presentation.upstreamIssueKey, 'GRB-221');
+  assert.equal(presentation.upstreamIssueKey, 'PRJ-221');
   assert.equal(presentation.upstreamStatus?.name, 'In Progress');
 });
 
@@ -2172,13 +2174,13 @@ test('comment sync presentation marks fetched comments and local comments separa
     if (url.endsWith('/rest/api/2/issue') && init?.method === 'POST') {
       return jsonResponse({
         id: '10002',
-        key: 'GRB-999'
+        key: 'PRJ-999'
       }, 201);
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-999?fields=summary,description,status,comment,updated,created,issuetype,assignee,creator,reporter')) {
+    if (url.endsWith('/rest/api/2/issue/PRJ-999?fields=summary,description,status,comment,updated,created,issuetype,assignee,creator,reporter')) {
       return jsonResponse({
         id: '10002',
-        key: 'GRB-999',
+        key: 'PRJ-999',
         fields: {
           summary: 'Local Paperclip issue',
           description: { type: 'doc', version: 1, content: [] },
@@ -2215,7 +2217,7 @@ test('comment sync presentation marks fetched comments and local comments separa
         }
       });
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-999/transitions')) {
+    if (url.endsWith('/rest/api/2/issue/PRJ-999/transitions')) {
       return jsonResponse({
         transitions: [
           { id: '31', name: 'Done' },
@@ -2223,7 +2225,7 @@ test('comment sync presentation marks fetched comments and local comments separa
         ]
       });
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-999/comment') && init?.method === 'POST') {
+    if (url.endsWith('/rest/api/2/issue/PRJ-999/comment') && init?.method === 'POST') {
       return jsonResponse({
         id: 'comment-remote-2'
       }, 201);
@@ -2251,7 +2253,7 @@ test('comment sync presentation marks fetched comments and local comments separa
       companyId: 'company-1',
       mappings: [
         {
-          jiraProjectKey: 'GRB',
+          jiraProjectKey: 'PRJ',
           paperclipProjectId: 'project-1',
           paperclipProjectName: 'Alpha'
         }
@@ -2320,7 +2322,7 @@ test('comment sync presentation marks fetched comments and local comments separa
 test('issue.comment.submit always publishes synced issue comments to Jira', async () => {
   const restoreFetch = installMockFetch(async (input, init) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.endsWith('/rest/api/2/issue/GRB-999/comment') && init?.method === 'POST') {
+    if (url.endsWith('/rest/api/2/issue/PRJ-999/comment') && init?.method === 'POST') {
       return jsonResponse({
         id: 'comment-remote-99'
       }, 201);
@@ -2351,8 +2353,8 @@ test('issue.comment.submit always publishes synced issue comments to Jira', asyn
       issues: [
         makeIssue({
           id: 'issue-1',
-          title: '[GRB-999] Local Paperclip issue',
-          description: 'Local body\n\n<!-- paperclip-external-issues-plugin-upstream: GRB-999 -->'
+          title: '[PRJ-999] Local Paperclip issue',
+          description: 'Local body\n\n<!-- paperclip-external-issues-plugin-upstream: PRJ-999 -->'
         })
       ]
     });
@@ -2367,7 +2369,7 @@ test('issue.comment.submit always publishes synced issue comments to Jira', asyn
         {
           id: 'mapping-1',
           providerId: 'provider-default-jira',
-          jiraProjectKey: 'GRB',
+          jiraProjectKey: 'PRJ',
           paperclipProjectId: 'project-1',
           paperclipProjectName: 'Alpha'
         }
@@ -2378,8 +2380,8 @@ test('issue.comment.submit always publishes synced issue comments to Jira', asyn
       entityType: 'paperclip-external-issues-plugin.issue-link',
       scopeKind: 'issue',
       scopeId: 'issue-1',
-      externalId: 'GRB-999',
-      title: 'GRB-999',
+      externalId: 'PRJ-999',
+      title: 'PRJ-999',
       status: 'Backlog',
       data: {
         issueId: 'issue-1',
@@ -2387,9 +2389,9 @@ test('issue.comment.submit always publishes synced issue comments to Jira', asyn
         projectId: 'project-1',
         providerId: 'provider-default-jira',
         jiraIssueId: '10002',
-        jiraIssueKey: 'GRB-999',
-        jiraProjectKey: 'GRB',
-        jiraUrl: 'https://jira.example.com/browse/GRB-999',
+        jiraIssueKey: 'PRJ-999',
+        jiraProjectKey: 'PRJ',
+        jiraUrl: 'https://jira.example.com/browse/PRJ-999',
         jiraStatusName: 'Backlog',
         jiraStatusCategory: 'To Do',
         lastSyncedAt: '2026-04-21T13:08:38.000Z',
@@ -2676,13 +2678,13 @@ test('issue sync presentation falls back to reporter when Jira creator is not pr
     if (url.endsWith('/rest/api/2/issue') && init?.method === 'POST') {
       return jsonResponse({
         id: '10002',
-        key: 'GRB-999'
+        key: 'PRJ-999'
       }, 201);
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-999?fields=summary,description,status,comment,updated,created,issuetype,assignee,creator,reporter')) {
+    if (url.endsWith('/rest/api/2/issue/PRJ-999?fields=summary,description,status,comment,updated,created,issuetype,assignee,creator,reporter')) {
       return jsonResponse({
         id: '10002',
-        key: 'GRB-999',
+        key: 'PRJ-999',
         fields: {
           summary: 'Local Paperclip issue',
           description: { type: 'doc', version: 1, content: [] },
@@ -2705,7 +2707,7 @@ test('issue sync presentation falls back to reporter when Jira creator is not pr
         }
       });
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-999/transitions')) {
+    if (url.endsWith('/rest/api/2/issue/PRJ-999/transitions')) {
       return jsonResponse({
         transitions: []
       });
@@ -2733,7 +2735,7 @@ test('issue sync presentation falls back to reporter when Jira creator is not pr
       companyId: 'company-1',
       mappings: [
         {
-          jiraProjectKey: 'GRB',
+          jiraProjectKey: 'PRJ',
           paperclipProjectId: 'project-1',
           paperclipProjectName: 'Alpha'
         }
@@ -2781,7 +2783,7 @@ test('issue sync presentation keeps a mapped local issue unsynced until it is li
     companyId: 'company-1',
     mappings: [
       {
-        jiraProjectKey: 'GRB',
+        jiraProjectKey: 'PRJ',
         paperclipProjectId: 'project-1',
         paperclipProjectName: 'Alpha'
       }
@@ -2807,10 +2809,10 @@ test('issue sync presentation keeps a mapped local issue unsynced until it is li
   assert.equal(presentation.upstreamIssueKey, null);
   assert.equal(presentation.openInProviderUrl, null);
   assert.equal(presentation.upstreamStatus, undefined);
-  assert.equal(presentation.mapping?.jiraProjectKey, 'GRB');
+  assert.equal(presentation.mapping?.jiraProjectKey, 'PRJ');
 });
 
-test('issue sync presentation ignores stale Jira link metadata when the issue no longer carries Jira markers', async () => {
+test('issue sync presentation uses persisted link metadata even when markers are missing', async () => {
   const harness = createTestHarness({
     manifest,
     config: {
@@ -2835,7 +2837,7 @@ test('issue sync presentation ignores stale Jira link metadata when the issue no
     companyId: 'company-1',
     mappings: [
       {
-        jiraProjectKey: 'GRB',
+        jiraProjectKey: 'PRJ',
         paperclipProjectId: 'project-1',
         paperclipProjectName: 'Alpha'
       }
@@ -2846,17 +2848,17 @@ test('issue sync presentation ignores stale Jira link metadata when the issue no
     entityType: 'paperclip-external-issues-plugin.issue-link',
     scopeKind: 'issue',
     scopeId: 'issue-stale-link',
-    externalId: 'GRB-461',
-    title: 'GRB-461',
+    externalId: 'PRJ-461',
+    title: 'PRJ-461',
     status: 'In Review',
     data: {
       issueId: 'issue-stale-link',
       companyId: 'company-1',
       projectId: 'project-1',
       jiraIssueId: '10001',
-      jiraIssueKey: 'GRB-461',
-      jiraProjectKey: 'GRB',
-      jiraUrl: 'https://jira.example.com/browse/GRB-461',
+      jiraIssueKey: 'PRJ-461',
+      jiraProjectKey: 'PRJ',
+      jiraUrl: 'https://jira.example.com/browse/PRJ-461',
       jiraAssigneeDisplayName: 'Andriy Dmytruk',
       jiraStatusName: 'In Review',
       jiraStatusCategory: 'In Progress',
@@ -2878,10 +2880,13 @@ test('issue sync presentation ignores stale Jira link metadata when the issue no
   });
 
   assert.equal(presentation.visible, true);
-  assert.equal(presentation.isSynced, false);
-  assert.equal(presentation.upstreamIssueKey, null);
-  assert.equal(presentation.openInProviderUrl, null);
-  assert.equal(presentation.upstreamStatus, undefined);
+  assert.equal(presentation.isSynced, true);
+  assert.equal(presentation.upstreamIssueKey, 'PRJ-461');
+  assert.equal(presentation.openInProviderUrl, 'https://jira.example.com/browse/PRJ-461');
+  assert.deepEqual(presentation.upstreamStatus, {
+    name: 'In Review',
+    category: 'In Progress'
+  });
 });
 
 test('ui helper labels describe sync progress and comment origin', async () => {

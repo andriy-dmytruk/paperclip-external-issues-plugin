@@ -10,7 +10,7 @@ import { SETTINGS_SCOPE } from '../core/defaults.ts';
 import { loadNormalizedState } from '../core/state.ts';
 import { getProjectConfig, normalizeSettings } from '../core/settings-runtime.ts';
 import { resolveMappingForIssue } from '../sync/project-resolution.ts';
-import { findOrRecoverLinkedIssueEntity } from '../sync/link-repository.ts';
+import { findLinkedIssueEntity } from '../sync/link-repository.ts';
 import { getProviderTypeById } from '../providers/provider-actions.ts';
 
 export async function authorizeIssueProviderTool(
@@ -62,7 +62,7 @@ export async function authorizeIssueProviderTool(
 
   const providerId = projectConfig.providerId;
   const providerType = await getProviderTypeById(ctx, providerId);
-  const link = await findOrRecoverLinkedIssueEntity(ctx, settings, runCtx.companyId, paperclipIssueId);
+  const link = await findLinkedIssueEntity(ctx, paperclipIssueId);
   if (options?.requireLinkedIssue && !link) {
     throw new Error('This Paperclip issue is not linked to an upstream issue yet.');
   }

@@ -67,7 +67,7 @@ const manifestBuildOptions = {
 
 const workerBuildOptions = {
   ...nodeSharedOptions,
-  entryPoints: [resolve(packageRoot, 'src/worker.ts')],
+  entryPoints: [resolve(packageRoot, 'src/worker-runtime.ts')],
   outfile: resolve(outdir, 'worker.js')
 };
 

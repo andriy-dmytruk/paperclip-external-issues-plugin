@@ -31,10 +31,12 @@ export function CleanupModal(props: {
   return (
     <div style={modalBackdropStyle()}>
       <div style={modalPanelStyle(720)}>
-        <div style={stackStyle(12)}>
-          <div style={rowStyle()}>
-            <strong>Hide imported issues</strong>
-            <span style={badgeStyle('info')}>{props.candidates.length} candidate{props.candidates.length === 1 ? '' : 's'}</span>
+        <div style={{ ...stackStyle(16), padding: 24 }}>
+          <div style={{ ...rowStyle(), alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+            <div style={rowStyle()}>
+              <strong>Hide imported issues</strong>
+              <span style={badgeStyle('info')}>{props.candidates.length} candidate{props.candidates.length === 1 ? '' : 's'}</span>
+            </div>
           </div>
           <div style={{ display: 'grid', gap: 8 }}>
             <label style={checkboxLabelStyle()}>
@@ -87,20 +89,37 @@ export function CleanupModal(props: {
           <div style={{ fontSize: 12, opacity: 0.72 }}>
             Select the imported issues you want to hide. This only hides them in Paperclip and leaves the upstream issues unchanged.
           </div>
-          <div style={{ display: 'grid', gap: 8, maxHeight: 320, overflowY: 'auto' }}>
+          <div style={{
+            display: 'grid',
+            gap: 10,
+            maxHeight: 360,
+            overflowY: 'auto',
+            paddingRight: 4
+          }}
+          >
             {props.visibleCandidates.length === 0 ? (
               <div style={{ fontSize: 13, opacity: 0.72 }}>
                 No imported issues match the current hide filter.
               </div>
             ) : props.visibleCandidates.map((candidate) => (
-              <label key={candidate.issueId} style={{ ...panelStyle(), ...rowStyle(), alignItems: 'flex-start' }}>
+              <label
+                key={candidate.issueId}
+                style={{
+                  ...panelStyle(),
+                  ...rowStyle(),
+                  alignItems: 'flex-start',
+                  gap: 14,
+                  padding: 18
+                }}
+              >
                 <input
                   type="checkbox"
                   checked={props.selectedIssueIds.includes(candidate.issueId)}
                   onChange={(event) => props.onToggleIssue(candidate.issueId, event.target.checked)}
+                  style={{ marginTop: 2 }}
                 />
-                <div style={{ display: 'grid', gap: 4 }}>
-                  <strong>{candidate.title}</strong>
+                <div style={{ display: 'grid', gap: 8, minWidth: 0, flex: '1 1 auto' }}>
+                  <strong style={{ lineHeight: 1.3 }}>{candidate.title}</strong>
                   <div style={rowStyle()}>
                     <span style={badgeStyle('info')}>{candidate.jiraIssueKey}</span>
                     <span style={badgeStyle('local')}>{formatIssueStatus(candidate.status)}</span>
@@ -109,7 +128,13 @@ export function CleanupModal(props: {
               </label>
             ))}
           </div>
-          <div style={rowStyle()}>
+          <div style={{
+            ...rowStyle(),
+            justifyContent: 'flex-end',
+            borderTop: '1px solid color-mix(in srgb, var(--border) 94%, transparent)',
+            paddingTop: 16
+          }}
+          >
             <button
               type="button"
               style={buttonStyle()}

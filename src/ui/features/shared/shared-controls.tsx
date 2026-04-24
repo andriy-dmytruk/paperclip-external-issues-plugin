@@ -1,23 +1,88 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { usePluginData } from '@paperclipai/plugin-sdk/ui';
+import { Check, ChevronDown, Search } from 'lucide-react';
 import type { ProviderType } from '../../plugin-config.js';
 import { isGitHubProviderType } from '../../../providers/shared/config.ts';
 import { formatUpstreamUserLabel, formatUpstreamUserSecondary, type UpstreamUserReference } from '../../assignees.js';
 import { useDebouncedValue } from '../../hooks.js';
 import {
   badgeStyle,
-  buildSyncProgressLabel,
   formatDate,
   formatIssueStatus,
   getProviderMappingSummaryNoun,
   inputStyle,
   panelStyle,
-  progressBarStyle,
-  progressFillStyle,
   rowStyle,
   stackStyle
 } from '../../primitives.js';
 import type { UpstreamUserSearchData, SyncProgressState, UpstreamProjectSearchData } from '../../types.js';
+
+function selectorTriggerStyle(disabled?: boolean): React.CSSProperties {
+  return {
+    width: '100%',
+    minHeight: 36,
+    height: 36,
+    borderRadius: 6,
+    border: '1px solid color-mix(in srgb, var(--border) 96%, transparent)',
+    background: 'var(--background, var(--card, transparent))',
+    color: 'inherit',
+    padding: '0 12px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    fontSize: 14,
+    lineHeight: 1.35,
+    textAlign: 'left',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    opacity: disabled ? 0.6 : 1,
+    boxSizing: 'border-box'
+  };
+}
+
+function selectorPopoverStyle(): React.CSSProperties {
+  return {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 'calc(100% + 6px)',
+    zIndex: 120,
+    background: 'var(--card, Canvas)',
+    border: '1px solid color-mix(in srgb, var(--border) 96%, transparent)',
+    borderRadius: 6,
+    boxShadow: '0 10px 30px rgba(15, 23, 42, 0.14)',
+    overflow: 'hidden'
+  };
+}
+
+function selectorSearchRowStyle(): React.CSSProperties {
+  return {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '10px 12px',
+    borderBottom: '1px solid color-mix(in srgb, var(--border) 92%, transparent)'
+  };
+}
+
+function selectorOptionStyle(selected: boolean, highlighted: boolean): React.CSSProperties {
+  return {
+    width: '100%',
+    border: 'none',
+    background: highlighted ? 'color-mix(in srgb, currentColor 8%, transparent)' : 'transparent',
+    color: 'inherit',
+    borderRadius: 6,
+    padding: '10px 12px',
+    textAlign: 'left',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    cursor: 'pointer',
+    boxSizing: 'border-box',
+    fontSize: 14,
+    lineHeight: 1.35
+  };
+}
 
 export function UpstreamUserAutocomplete(props: {
   companyId: string;
@@ -32,28 +97,99 @@ export function UpstreamUserAutocomplete(props: {
   trailingAction?: React.ReactNode;
   onChange: (user: UpstreamUserReference | null) => void;
 }): React.JSX.Element {
-  const [query, setQuery] = useState(formatUpstreamUserLabel(props.value));
+  const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const containerRef = useRef<HTMLLabelElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const debouncedQuery = useDebouncedValue(query, 250);
   const search = usePluginData<UpstreamUserSearchData>('sync.users.search', {
     companyId: props.companyId,
     providerId: props.providerId ?? undefined,
-    query: props.providerId ? debouncedQuery : ''
+    query: props.providerId && open && debouncedQuery.trim().length > 0 ? debouncedQuery : ''
   });
 
   useEffect(() => {
-    const nextLabel = formatUpstreamUserLabel(props.value);
-    if (nextLabel !== query) {
-      setQuery(nextLabel);
+    if (!open) {
+      setQuery('');
     }
-  }, [props.value]);
+  }, [open]);
 
   const suggestions = search.data?.suggestions ?? [];
   const searchError = search.data?.errorMessage;
-  const canSearch = Boolean(props.providerId && debouncedQuery.trim().length > 0 && !props.disabled);
+  const canSearch = Boolean(props.providerId && !props.disabled);
+  const selectedAccountId = props.value?.accountId ?? '';
+  const selectedLabel = formatUpstreamUserLabel(props.value);
+  const selectedSecondary = formatUpstreamUserSecondary(props.value);
+
+  const options = useMemo(() => {
+    const items: Array<{
+      key: string;
+      user: UpstreamUserReference | null;
+      label: string;
+      secondary?: string;
+    }> = [{
+      key: '__none__',
+      user: null,
+      label: 'No assignee'
+    }];
+
+    if (props.value) {
+      items.push({
+        key: props.value.accountId,
+        user: props.value,
+        label: selectedLabel,
+        secondary: selectedSecondary || undefined
+      });
+    }
+
+    for (const suggestion of suggestions) {
+      if (items.some((item) => item.key === suggestion.accountId)) {
+        continue;
+      }
+      items.push({
+        key: suggestion.accountId,
+        user: suggestion,
+        label: formatUpstreamUserLabel(suggestion),
+        secondary: formatUpstreamUserSecondary(suggestion) || undefined
+      });
+    }
+
+    return items;
+  }, [props.value, selectedLabel, selectedSecondary, suggestions]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const handlePointerDown = (event: PointerEvent) => {
+      if (containerRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      setOpen(false);
+    };
+    window.addEventListener('pointerdown', handlePointerDown);
+    return () => window.removeEventListener('pointerdown', handlePointerDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    setHighlightedIndex(0);
+    window.requestAnimationFrame(() => {
+      inputRef.current?.focus();
+    });
+  }, [open]);
+
+  function commitSelection(user: UpstreamUserReference | null) {
+    props.onChange(user);
+    setOpen(false);
+    setQuery('');
+  }
 
   return (
-    <label style={{ ...stackStyle(6), position: 'relative', zIndex: open ? 80 : 1 }}>
+    <label ref={containerRef} style={{ ...stackStyle(6), position: 'relative', zIndex: open ? 80 : 1 }}>
       {props.hideLabel ? null : <span style={{ fontSize: 13, fontWeight: 600 }}>{props.label}</span>}
       <div style={{
         display: 'grid',
@@ -62,85 +198,135 @@ export function UpstreamUserAutocomplete(props: {
         alignItems: 'start'
       }}
       >
-        <input
-          style={inputStyle()}
-          value={query}
+        <button
+          type="button"
+          style={selectorTriggerStyle(props.disabled)}
           disabled={props.disabled}
-          placeholder={props.placeholder}
-          onFocus={() => setOpen(true)}
-          onBlur={() => {
-            window.setTimeout(() => {
-              setOpen(false);
-              setQuery(formatUpstreamUserLabel(props.value));
-            }, 120);
-          }}
-          onChange={(event) => {
-            const nextValue = event.target.value;
-            setQuery(nextValue);
-            if (!open) {
-              setOpen(true);
+          onClick={() => {
+            if (!props.disabled) {
+              setOpen((current) => !current);
             }
           }}
-        />
+          onKeyDown={(event) => {
+            if ((event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') && !props.disabled) {
+              event.preventDefault();
+              setOpen(true);
+            }
+            if (event.key === 'Escape') {
+              setOpen(false);
+            }
+          }}
+        >
+          <span style={{
+            minWidth: 0,
+            flex: '1 1 auto',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            color: props.value ? 'inherit' : 'color-mix(in srgb, currentColor 56%, transparent)'
+          }}
+          >
+            {props.value ? selectedLabel : (props.placeholder ?? 'Select assignee')}
+          </span>
+          <ChevronDown size={15} style={{ opacity: 0.55, flex: '0 0 auto' }} />
+        </button>
         {props.trailingAction}
       </div>
-      {props.value && !props.hideSelectedSecondary ? (
-        <div style={{ fontSize: 12, opacity: 0.72 }}>
-          {formatUpstreamUserSecondary(props.value) || props.value.accountId}
-        </div>
-      ) : null}
-      {open && canSearch ? (
-        <div style={{
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          top: 'calc(100% + 4px)',
-          zIndex: 120,
-          ...panelStyle(),
-          background: 'var(--card, Canvas)',
-          border: '1px solid color-mix(in srgb, var(--border) 96%, transparent)',
-          boxShadow: '0 22px 44px rgba(15, 23, 42, 0.24)',
-          display: 'grid',
-          gap: 4,
-          maxHeight: props.dropdownMaxHeight ?? 220,
-          overflowY: 'auto',
-          padding: 8
-        }}
-        >
-          {search.loading ? (
-            <div style={{ fontSize: 12, opacity: 0.72 }}>Searching users…</div>
-          ) : searchError ? (
-            <div style={{ fontSize: 12, color: 'var(--danger, #b91c1c)' }}>{searchError}</div>
-          ) : suggestions.length > 0 ? suggestions.map((suggestion) => (
-            <button
-              key={suggestion.accountId}
-              type="button"
+      {open ? (
+        <div style={selectorPopoverStyle()}>
+          <div style={selectorSearchRowStyle()}>
+            <Search size={15} style={{ opacity: 0.5, flex: '0 0 auto' }} />
+            <input
+              ref={inputRef}
               style={{
-                borderRadius: 12,
-                border: '1px solid color-mix(in srgb, var(--border) 88%, transparent)',
+                width: '100%',
+                border: 'none',
                 background: 'transparent',
                 color: 'inherit',
-                padding: '8px 10px',
-                textAlign: 'left',
-                display: 'grid',
-                gap: 2,
-                cursor: 'pointer'
+                padding: 0,
+                fontSize: 14,
+                lineHeight: 1.35,
+                outline: 'none'
               }}
-              onMouseDown={(event) => {
-                event.preventDefault();
-                props.onChange(suggestion);
-                setQuery(formatUpstreamUserLabel(suggestion));
-                setOpen(false);
+              value={query}
+              placeholder={props.placeholder ?? 'Search users...'}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setHighlightedIndex(0);
               }}
-            >
-              <span>{formatUpstreamUserLabel(suggestion)}</span>
-              {formatUpstreamUserSecondary(suggestion) ? (
-                <span style={{ fontSize: 12, opacity: 0.72 }}>{formatUpstreamUserSecondary(suggestion)}</span>
-              ) : null}
-            </button>
-          )) : (
-            <div style={{ fontSize: 12, opacity: 0.72 }}>No users match this search yet.</div>
-          )}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault();
+                  setHighlightedIndex((current) => (
+                    options.length === 0 ? 0 : (current + 1) % options.length
+                  ));
+                  return;
+                }
+                if (event.key === 'ArrowUp') {
+                  event.preventDefault();
+                  setHighlightedIndex((current) => (
+                    options.length === 0 ? 0 : (current <= 0 ? options.length - 1 : current - 1)
+                  ));
+                  return;
+                }
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  const option = options[highlightedIndex] ?? options[0];
+                  if (option) {
+                    commitSelection(option.user);
+                  }
+                  return;
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  setOpen(false);
+                }
+              }}
+            />
+          </div>
+          <div style={{
+            maxHeight: props.dropdownMaxHeight ?? 240,
+            overflowY: 'auto',
+            padding: 4
+          }}
+          >
+            {!canSearch ? (
+              <div style={{ padding: '10px 12px', fontSize: 12, opacity: 0.72 }}>
+                Select a provider before searching users.
+              </div>
+            ) : search.loading ? (
+              <div style={{ padding: '10px 12px', fontSize: 12, opacity: 0.72 }}>Searching assignees…</div>
+            ) : searchError ? (
+              <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--danger, #b91c1c)' }}>{searchError}</div>
+            ) : options.length > 0 ? options.map((option, index) => {
+              const isSelected = option.user ? option.user.accountId === selectedAccountId : !props.value;
+              const isHighlighted = highlightedIndex === index;
+              return (
+                <button
+                  key={option.key}
+                  type="button"
+                  style={selectorOptionStyle(isSelected, isHighlighted)}
+                  onMouseEnter={() => setHighlightedIndex(index)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => commitSelection(option.user)}
+                >
+                  <span style={{ minWidth: 0, display: 'grid', gap: 2, flex: '1 1 auto' }}>
+                    <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {option.label}
+                    </span>
+                    {option.secondary ? (
+                      <span style={{ fontSize: 12, opacity: 0.62, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {option.secondary}
+                      </span>
+                    ) : null}
+                  </span>
+                  <Check size={15} style={{ opacity: isSelected ? 0.85 : 0, flex: '0 0 auto' }} />
+                </button>
+              );
+            }) : (
+              <div style={{ padding: '10px 12px', fontSize: 12, opacity: 0.72 }}>No assignees found.</div>
+            )}
+          </div>
         </div>
       ) : null}
     </label>
@@ -160,103 +346,244 @@ export function UpstreamProjectAutocomplete(props: {
 }): React.JSX.Element {
   const [query, setQuery] = useState(props.value);
   const [open, setOpen] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(0);
+  const containerRef = useRef<HTMLLabelElement | null>(null);
+  const inputRef = useRef<HTMLInputElement | null>(null);
   const debouncedQuery = useDebouncedValue(query, 250);
   const search = usePluginData<UpstreamProjectSearchData>('sync.upstreamProjects.search', {
     companyId: props.companyId,
     providerId: props.providerId ?? undefined,
-    query: props.providerId ? debouncedQuery : ''
+    query: props.providerId && open ? debouncedQuery : ''
   });
 
   useEffect(() => {
-    if (props.value !== query) {
+    if (!open && props.value !== query) {
       setQuery(props.value);
     }
-  }, [props.value]);
+  }, [open, props.value, query]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const handlePointerDown = (event: PointerEvent) => {
+      if (containerRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      setOpen(false);
+      setQuery(props.value);
+    };
+    window.addEventListener('pointerdown', handlePointerDown);
+    return () => window.removeEventListener('pointerdown', handlePointerDown);
+  }, [open, props.value]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    setHighlightedIndex(0);
+    window.requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    });
+  }, [open]);
 
   const suggestions = search.data?.suggestions ?? [];
   const searchError = search.data?.errorMessage;
   const canSearch = Boolean(props.providerId && !props.disabled);
+  const normalizedQuery = query.trim();
+  const selectedKey = props.value.trim().toLowerCase();
+
+  const options = useMemo(() => {
+    const items: Array<{
+      key: string;
+      value: string;
+      label: string;
+      secondary?: string;
+      custom?: boolean;
+    }> = [];
+
+    if (normalizedQuery.length > 0) {
+      items.push({
+        key: `__custom__:${normalizedQuery.toLowerCase()}`,
+        value: normalizedQuery,
+        label: normalizedQuery,
+        secondary: `Use this ${getProviderMappingSummaryNoun(props.providerType)}`,
+        custom: true
+      });
+    }
+
+    for (const suggestion of suggestions) {
+      const suggestionValue = suggestion.key.trim();
+      const optionKey = suggestionValue.toLowerCase();
+      if (items.some((item) => item.key === optionKey || item.value.toLowerCase() === optionKey)) {
+        continue;
+      }
+      items.push({
+        key: optionKey,
+        value: suggestionValue,
+        label: suggestion.displayName || suggestionValue,
+        secondary: isGitHubProviderType(props.providerType) ? (suggestion.url ?? suggestionValue) : suggestionValue
+      });
+    }
+
+    if (props.value.trim() && !items.some((item) => item.value.toLowerCase() === selectedKey)) {
+      items.unshift({
+        key: selectedKey,
+        value: props.value.trim(),
+        label: props.value.trim(),
+        secondary: `Current ${getProviderMappingSummaryNoun(props.providerType)}`
+      });
+    }
+
+    return items;
+  }, [normalizedQuery, props.providerType, props.value, selectedKey, suggestions]);
+
+  function commitSelection(value: string) {
+    props.onChange(value);
+    setQuery(value);
+    setOpen(false);
+  }
 
   return (
-    <label style={{ ...stackStyle(6), position: 'relative', zIndex: open ? 80 : 1 }}>
+    <label ref={containerRef} style={{ ...stackStyle(6), position: 'relative', zIndex: open ? 80 : 1 }}>
       {props.hideLabel ? null : <span style={{ fontSize: 13, fontWeight: 600 }}>{props.label}</span>}
-      <input
-        style={inputStyle()}
-        value={query}
+      <button
+        type="button"
+        style={selectorTriggerStyle(props.disabled)}
         disabled={props.disabled}
-        placeholder={props.placeholder}
-        onFocus={() => setOpen(true)}
-        onBlur={() => {
-          window.setTimeout(() => {
-            setOpen(false);
+        onClick={() => {
+          if (!props.disabled) {
             setQuery(props.value);
-          }, 120);
-        }}
-        onChange={(event) => {
-          const nextValue = event.target.value;
-          setQuery(nextValue);
-          props.onChange(nextValue);
-          if (!open) {
-            setOpen(true);
+            setOpen((current) => !current);
           }
         }}
-      />
-      {open && canSearch ? (
-        <div style={{
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          top: 'calc(100% + 4px)',
-          zIndex: 120,
-          ...panelStyle(),
-          background: 'var(--card, Canvas)',
-          border: '1px solid color-mix(in srgb, var(--border) 96%, transparent)',
-          boxShadow: '0 22px 44px rgba(15, 23, 42, 0.24)',
-          display: 'grid',
-          gap: 4,
-          maxHeight: 220,
-          overflowY: 'auto',
-          padding: 8
+        onKeyDown={(event) => {
+          if ((event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') && !props.disabled) {
+            event.preventDefault();
+            setQuery(props.value);
+            setOpen(true);
+          }
+          if (event.key === 'Escape') {
+            setOpen(false);
+          }
+        }}
+      >
+        <span style={{
+          minWidth: 0,
+          flex: '1 1 auto',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          color: props.value ? 'inherit' : 'color-mix(in srgb, currentColor 56%, transparent)'
         }}
         >
-          {search.loading ? (
-            <div style={{ fontSize: 12, opacity: 0.72 }}>
-              {`Searching ${getProviderMappingSummaryNoun(props.providerType)}s…`}
-            </div>
-          ) : searchError ? (
-            <div style={{ fontSize: 12, color: 'var(--danger, #b91c1c)' }}>{searchError}</div>
-          ) : suggestions.length > 0 ? suggestions.map((suggestion) => (
-            <button
-              key={suggestion.id}
-              type="button"
+          {props.value || props.placeholder}
+        </span>
+        <ChevronDown size={15} style={{ opacity: 0.55, flex: '0 0 auto' }} />
+      </button>
+      {open ? (
+        <div style={selectorPopoverStyle()}>
+          <div style={selectorSearchRowStyle()}>
+            <Search size={15} style={{ opacity: 0.5, flex: '0 0 auto' }} />
+            <input
+              ref={inputRef}
               style={{
-                borderRadius: 12,
-                border: '1px solid color-mix(in srgb, var(--border) 88%, transparent)',
+                width: '100%',
+                border: 'none',
                 background: 'transparent',
                 color: 'inherit',
-                padding: '8px 10px',
-                textAlign: 'left',
-                display: 'grid',
-                gap: 2,
-                cursor: 'pointer'
+                padding: 0,
+                fontSize: 14,
+                lineHeight: 1.35,
+                outline: 'none'
               }}
-              onMouseDown={(event) => {
-                event.preventDefault();
-                props.onChange(suggestion.key);
-                setQuery(suggestion.key);
-                setOpen(false);
+              value={query}
+              placeholder={props.placeholder}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setHighlightedIndex(0);
               }}
-            >
-              <span>{suggestion.displayName}</span>
-              <span style={{ fontSize: 12, opacity: 0.72 }}>
-                {isGitHubProviderType(props.providerType) ? (suggestion.url ?? suggestion.key) : suggestion.key}
-              </span>
-            </button>
-          )) : (
-            <div style={{ fontSize: 12, opacity: 0.72 }}>
-              No {getProviderMappingSummaryNoun(props.providerType)}s match this search yet.
-            </div>
-          )}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault();
+                  setHighlightedIndex((current) => (
+                    options.length === 0 ? 0 : (current + 1) % options.length
+                  ));
+                  return;
+                }
+                if (event.key === 'ArrowUp') {
+                  event.preventDefault();
+                  setHighlightedIndex((current) => (
+                    options.length === 0 ? 0 : (current <= 0 ? options.length - 1 : current - 1)
+                  ));
+                  return;
+                }
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  const option = options[highlightedIndex] ?? (normalizedQuery ? {
+                    value: normalizedQuery
+                  } : null);
+                  if (option?.value) {
+                    commitSelection(option.value);
+                  }
+                  return;
+                }
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  setOpen(false);
+                  setQuery(props.value);
+                }
+              }}
+            />
+          </div>
+          <div style={{
+            maxHeight: 240,
+            overflowY: 'auto',
+            padding: 4
+          }}
+          >
+            {!canSearch ? (
+              <div style={{ padding: '10px 12px', fontSize: 12, opacity: 0.72 }}>
+                Select a provider before searching {getProviderMappingSummaryNoun(props.providerType)}s.
+              </div>
+            ) : search.loading ? (
+              <div style={{ padding: '10px 12px', fontSize: 12, opacity: 0.72 }}>
+                {`Searching ${getProviderMappingSummaryNoun(props.providerType)}s…`}
+              </div>
+            ) : searchError ? (
+              <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--danger, #b91c1c)' }}>{searchError}</div>
+            ) : options.length > 0 ? options.map((option, index) => {
+              const isSelected = option.value.trim().toLowerCase() === selectedKey;
+              const isHighlighted = highlightedIndex === index;
+              return (
+                <button
+                  key={option.key}
+                  type="button"
+                  style={selectorOptionStyle(isSelected, isHighlighted)}
+                  onMouseEnter={() => setHighlightedIndex(index)}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => commitSelection(option.value)}
+                >
+                  <span style={{ minWidth: 0, display: 'grid', gap: 2, flex: '1 1 auto' }}>
+                    <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {option.label}
+                    </span>
+                    {option.secondary ? (
+                      <span style={{ fontSize: 12, opacity: 0.62, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {option.secondary}
+                      </span>
+                    ) : null}
+                  </span>
+                  <Check size={15} style={{ opacity: isSelected ? 0.85 : 0, flex: '0 0 auto' }} />
+                </button>
+              );
+            }) : (
+              <div style={{ padding: '10px 12px', fontSize: 12, opacity: 0.72 }}>
+                No {getProviderMappingSummaryNoun(props.providerType)}s match this search yet.
+              </div>
+            )}
+          </div>
         </div>
       ) : null}
     </label>
@@ -273,7 +600,7 @@ export function ResultMessage(props: {
 
   return (
     <div style={{
-      borderRadius: 12,
+      borderRadius: 4,
       padding: '10px 12px',
       background:
         props.tone === 'success'
@@ -291,50 +618,144 @@ export function ResultMessage(props: {
 
 export function SyncProgressPanel(props: {
   syncProgress?: SyncProgressState;
+  pending?: boolean;
+  pendingLabel?: string;
 }): React.JSX.Element {
-  const syncProgress = props.syncProgress;
-  const processedCount = syncProgress?.processedCount ?? 0;
-  const totalCount = syncProgress?.totalCount ?? 0;
-  const percent = totalCount > 0 ? Math.round((processedCount / totalCount) * 100) : 0;
+  const syncProgress = props.pending
+    ? {
+        ...(props.syncProgress ?? {}),
+        status: 'running' as const,
+        message: props.pendingLabel ?? 'Sync started.'
+      }
+    : props.syncProgress;
+
+  if (!syncProgress) {
+    return <></>;
+  }
+
+  const isRunning = syncProgress.status === 'running';
+  const isSuccess = syncProgress.status === 'success';
+  const isError = syncProgress.status === 'error';
+  const processedCount = syncProgress.processedCount ?? 0;
+  const totalCount = syncProgress.totalCount ?? 0;
+  const hasKnownProgress = totalCount > 0;
+  const progressPercent = hasKnownProgress
+    ? Math.max(0, Math.min(100, Math.round((processedCount / totalCount) * 100)))
+    : null;
+  const summaryText =
+    isRunning
+      ? (
+          hasKnownProgress
+            ? `${processedCount} of ${totalCount} issues processed`
+            : (syncProgress.message ?? props.pendingLabel ?? 'Sync started.')
+        )
+      : isError
+        ? (syncProgress.message ?? 'Sync failed.')
+        : null;
+  const stats = [
+    { label: 'Imported', value: syncProgress.importedCount ?? 0 },
+    { label: 'Updated', value: syncProgress.updatedCount ?? 0 },
+    { label: 'Skipped', value: syncProgress.skippedCount ?? 0 },
+    { label: 'Failed', value: syncProgress.failedCount ?? 0 }
+  ];
+  const showStats = isRunning || isSuccess || isError;
+  const titleText = isRunning
+    ? 'Sync Started'
+    : isSuccess
+      ? 'Sync Success'
+      : isError
+        ? 'Sync Failed'
+        : 'Ready';
 
   return (
-    <div style={panelStyle(syncProgress?.status === 'success' ? 'synced' : 'default')}>
-      <div style={stackStyle(8)}>
-        <div style={rowStyle()}>
-          <strong>Sync status</strong>
-          <span style={badgeStyle(
-            syncProgress?.status === 'success'
-              ? 'synced'
-              : syncProgress?.status === 'error'
-                ? 'error'
-                : 'info'
-          )}
+    <div style={panelStyle(isSuccess ? 'synced' : isError ? 'local' : 'default')}>
+      <div style={stackStyle(6)}>
+        <div style={{ ...rowStyle(), justifyContent: 'space-between', gap: 12 }}>
+          <strong>{titleText}</strong>
+          {isRunning || isSuccess || isError ? (
+            <span style={badgeStyle(
+              isSuccess
+                ? 'synced'
+                : isError
+                  ? 'error'
+                  : 'info'
+            )}
+            >
+              {isRunning ? 'In progress' : isSuccess ? 'Completed' : 'Needs attention'}
+            </span>
+          ) : null}
+        </div>
+        {summaryText ? (
+          <div style={{
+            fontSize: 13,
+            opacity: 0.84,
+            color: isRunning ? 'color-mix(in srgb, #2563eb 72%, currentColor)' : undefined
+          }}
           >
-            {syncProgress?.status ? formatIssueStatus(syncProgress.status) : 'Idle'}
-          </span>
-        </div>
-        <div style={{ fontSize: 13, opacity: 0.8 }}>
-          {buildSyncProgressLabel(syncProgress)}
-        </div>
-        {totalCount > 0 ? (
-          <div style={stackStyle(6)}>
-            <div style={progressBarStyle(percent)}>
-              <div style={progressFillStyle(percent)} />
-            </div>
-            <div style={{ fontSize: 12, opacity: 0.75 }}>
-              {percent}% complete
-            </div>
+            {summaryText}
           </div>
         ) : null}
-        <div style={rowStyle()}>
-          <span style={{ fontSize: 12, opacity: 0.75 }}>Imported: {syncProgress?.importedCount ?? 0}</span>
-          <span style={{ fontSize: 12, opacity: 0.75 }}>Updated: {syncProgress?.updatedCount ?? 0}</span>
-          <span style={{ fontSize: 12, opacity: 0.75 }}>Skipped: {syncProgress?.skippedCount ?? 0}</span>
-          <span style={{ fontSize: 12, opacity: 0.75 }}>Failed: {syncProgress?.failedCount ?? 0}</span>
-        </div>
-        <div style={{ fontSize: 12, opacity: 0.75 }}>
-          Last sync: {formatDate(syncProgress?.checkedAt)}
-        </div>
+        {isRunning && progressPercent !== null ? (
+          <div style={{ ...rowStyle(), gap: 10 }}>
+            <div style={{
+              width: 'min(220px, 100%)',
+              height: 6,
+              borderRadius: 999,
+              background: 'color-mix(in srgb, currentColor 10%, transparent)',
+              overflow: 'hidden'
+            }}
+            >
+              <div style={{
+                width: `${progressPercent}%`,
+                height: '100%',
+                borderRadius: 999,
+                background: 'var(--foreground, #111827)',
+                transition: 'width 180ms ease'
+              }}
+              />
+            </div>
+            <span style={{ fontSize: 12, opacity: 0.7 }}>{progressPercent}%</span>
+          </div>
+        ) : null}
+        {showStats || Boolean(syncProgress.checkedAt) ? (
+          <div style={{ ...rowStyle(), gap: 8 }}>
+            {showStats ? stats.map((stat) => (
+              <span
+                key={stat.label}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 12,
+                  padding: '3px 8px',
+                  borderRadius: 999,
+                  border: '1px solid color-mix(in srgb, var(--border) 92%, transparent)',
+                  background: 'var(--background, var(--card, transparent))'
+                }}
+              >
+                <span style={{ opacity: 0.68 }}>{stat.label}</span>
+                <strong style={{ fontSize: 12 }}>{stat.value}</strong>
+              </span>
+            )) : null}
+            {syncProgress.checkedAt ? (
+              <span
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontSize: 12,
+                  padding: '3px 8px',
+                  borderRadius: 999,
+                  border: '1px solid color-mix(in srgb, var(--border) 92%, transparent)',
+                  background: 'var(--background, var(--card, transparent))'
+                }}
+              >
+                <span style={{ opacity: 0.68 }}>{isRunning ? 'Started' : 'Last sync'}</span>
+                <strong style={{ fontSize: 12 }}>{formatDate(syncProgress.checkedAt)}</strong>
+              </span>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -1,16 +1,10 @@
 import type { Issue } from '@paperclipai/plugin-sdk';
 import type {
-  PluginSyncSettings,
   UpstreamCommentLinkData,
   UpstreamIssueLinkData
 } from '../core/models.ts';
-import type { PluginSetupContext } from '../core/context.ts';
 import { COMMENT_LINKS_STATE_KEY, ISSUE_LINK_ENTITY_TYPE } from '../core/defaults.ts';
-import { providerConfigResolver } from '../core/context.ts';
-import { resolveMappingForIssue } from './project-resolution.ts';
-import { getProviderTypeById, searchUpstreamIssues } from '../providers/provider-actions.ts';
-import { buildLinkIdentityCandidates, getLinkIdentityMetadata } from './reconcile.ts';
-import { isConfigReady, isGitHubConfigReady } from '../data/provider-status.ts';
+import { buildLinkIdentityCandidates } from './reconcile.ts';
 
 interface LinkRepositoryContext {
   entities: {
@@ -34,16 +28,6 @@ interface LinkRepositoryContext {
   };
 }
 
-export function extractUpstreamIssueKey(issue: Issue): string | null {
-  const markerMatch = issue.description?.match(/<!-- paperclip-external-issues-plugin-upstream: ([^ >]+) -->/i);
-  if (markerMatch?.[1]) {
-    return markerMatch[1].trim().toUpperCase();
-  }
-
-  const titleMatch = issue.title.match(/^\[([A-Z][A-Z0-9]+-\d+)\]/i);
-  return titleMatch?.[1]?.trim().toUpperCase() ?? null;
-}
-
 export function isIssueHidden(issue: Issue): boolean {
   const issueRecord = issue as unknown as Record<string, unknown>;
   return issueRecord.hidden === true || Boolean(issueRecord.hiddenAt);
@@ -63,38 +47,6 @@ export async function findLinkedIssueEntity(
   }
 
   return scopedRecord.data as UpstreamIssueLinkData;
-}
-
-export async function findLinkedIssueEntityByKey(
-  ctx: LinkRepositoryContext,
-  jiraIssueKey: string,
-  options?: {
-    companyId?: string;
-    projectId?: string;
-  }
-): Promise<UpstreamIssueLinkData | null> {
-  const records = await ctx.entities.list({
-    entityType: ISSUE_LINK_ENTITY_TYPE,
-    limit: 500
-  });
-  if (records.length === 0) {
-    return null;
-  }
-
-  const scoped = records
-    .map((record) => record.data as UpstreamIssueLinkData)
-    .filter((record) =>
-      record.jiraIssueKey === jiraIssueKey
-      && (!options?.companyId || record.companyId === options.companyId)
-      && (!options?.projectId || record.projectId === options.projectId)
-    );
-  const sortedByLastSynced = [...scoped].sort((left, right) => {
-    const leftTime = left.lastSyncedAt ? Date.parse(left.lastSyncedAt) : Number.NEGATIVE_INFINITY;
-    const rightTime = right.lastSyncedAt ? Date.parse(right.lastSyncedAt) : Number.NEGATIVE_INFINITY;
-    return rightTime - leftTime;
-  });
-
-  return sortedByLastSynced[0] ?? null;
 }
 
 export async function findLinkedIssueEntityByIdentity(
@@ -144,83 +96,6 @@ export async function upsertIssueLinkEntity(
     status: data.jiraStatusName,
     data: data as unknown as Record<string, unknown>
   });
-}
-
-export async function findOrRecoverLinkedIssueEntity(
-  ctx: PluginSetupContext,
-  settings: PluginSyncSettings,
-  companyId: string,
-  issueId: string
-): Promise<UpstreamIssueLinkData | null> {
-  const existing = await findLinkedIssueEntity(ctx, issueId);
-  if (existing) {
-    return existing;
-  }
-
-  const issue = await ctx.issues.get(issueId, companyId);
-  if (!issue) {
-    return null;
-  }
-
-  const jiraIssueKey = extractUpstreamIssueKey(issue);
-  if (!jiraIssueKey) {
-    return null;
-  }
-
-  const byKey = await findLinkedIssueEntityByKey(ctx, jiraIssueKey, {
-    companyId,
-    projectId: issue.projectId ?? undefined
-  });
-  if (byKey?.issueId === issueId) {
-    return byKey;
-  }
-
-  const mapping = await resolveMappingForIssue(ctx, settings, companyId, issueId);
-  if (!mapping) {
-    return null;
-  }
-
-  const providerId = mapping.providerId;
-  const providerType = await getProviderTypeById(ctx, providerId);
-  if (providerType === 'github_issues') {
-    if (!isGitHubConfigReady(await providerConfigResolver.resolveGitHubProviderConfig(ctx, providerId))) {
-      return null;
-    }
-  } else if (!isConfigReady(await providerConfigResolver.resolveJiraProviderConfig(ctx, providerId))) {
-    return null;
-  }
-
-  const [jiraIssue] = await searchUpstreamIssues(ctx, mapping, { issueKey: jiraIssueKey });
-  if (!jiraIssue) {
-    return null;
-  }
-
-  const repairedLink: UpstreamIssueLinkData = {
-    issueId,
-    companyId,
-    projectId: issue.projectId ?? mapping.paperclipProjectId,
-    ...(providerId ? { providerId } : {}),
-    ...getLinkIdentityMetadata({
-      providerType,
-      jiraProjectKey: mapping.jiraProjectKey,
-      jiraIssueId: jiraIssue.id,
-      jiraIssueKey: jiraIssue.key
-    }),
-    jiraIssueId: jiraIssue.id,
-    jiraIssueKey: jiraIssue.key,
-    jiraProjectKey: mapping.jiraProjectKey,
-    jiraUrl: jiraIssue.url,
-    ...(jiraIssue.assigneeDisplayName ? { jiraAssigneeDisplayName: jiraIssue.assigneeDisplayName } : {}),
-    ...(jiraIssue.creatorDisplayName ? { jiraCreatorDisplayName: jiraIssue.creatorDisplayName } : {}),
-    jiraStatusName: jiraIssue.statusName,
-    jiraStatusCategory: jiraIssue.statusCategory,
-    linkedCommentCount: jiraIssue.comments.length,
-    lastSyncedAt: new Date().toISOString(),
-    lastPulledAt: new Date().toISOString(),
-    source: 'jira'
-  };
-  await upsertIssueLinkEntity(ctx, issueId, repairedLink);
-  return repairedLink;
 }
 
 async function getCommentLinkRegistry(

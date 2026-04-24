@@ -33,7 +33,7 @@ test('sync.projectPage defaults agent issue provider access to disabled for lega
     providerId: 'provider-default-jira',
     mappings: [
       {
-        jiraProjectKey: 'GRB',
+        jiraProjectKey: 'PRJ',
         paperclipProjectId: 'project-1',
         paperclipProjectName: 'Alpha'
       }
@@ -64,13 +64,13 @@ test('create_upstream_issue tool creates a Jira issue for an allowlisted agent',
     if (url.endsWith('/rest/api/2/issue') && init?.method === 'POST') {
       return jsonResponse({
         id: '10002',
-        key: 'GRB-999'
+        key: 'PRJ-999'
       }, 201);
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-999?fields=summary,description,status,comment,updated,created,issuetype,assignee,creator,reporter')) {
+    if (url.endsWith('/rest/api/2/issue/PRJ-999?fields=summary,description,status,comment,updated,created,issuetype,assignee,creator,reporter')) {
       return jsonResponse({
         id: '10002',
-        key: 'GRB-999',
+        key: 'PRJ-999',
         fields: {
           summary: 'Local Paperclip issue',
           description: { type: 'doc', version: 1, content: [] },
@@ -84,7 +84,7 @@ test('create_upstream_issue tool creates a Jira issue for an allowlisted agent',
         }
       });
     }
-    if (url.endsWith('/rest/api/2/issue/GRB-999/transitions')) {
+    if (url.endsWith('/rest/api/2/issue/PRJ-999/transitions')) {
       return jsonResponse({
         transitions: [
           { id: '31', name: 'Done' }
@@ -122,7 +122,7 @@ test('create_upstream_issue tool creates a Jira issue for an allowlisted agent',
       },
       mappings: [
         {
-          jiraProjectKey: 'GRB',
+          jiraProjectKey: 'PRJ',
           paperclipProjectId: 'project-1',
           paperclipProjectName: 'Alpha'
         }
@@ -153,10 +153,10 @@ test('create_upstream_issue tool creates a Jira issue for an allowlisted agent',
     });
 
     assert.equal(result.error, undefined);
-    assert.equal(result.data?.issueKey, 'GRB-999');
-    assert.match(result.content ?? '', /Created upstream issue GRB-999\./);
+    assert.equal(result.data?.issueKey, 'PRJ-999');
+    assert.match(result.content ?? '', /Created upstream issue PRJ-999\./);
     assert.equal(details.linked, true);
-    assert.equal(details.upstream?.issueKey, 'GRB-999');
+    assert.equal(details.upstream?.issueKey, 'PRJ-999');
   } finally {
     restoreFetch();
   }
@@ -285,7 +285,7 @@ test('issue provider agent tools reject agents that are not allowlisted', async 
     },
     mappings: [
       {
-        jiraProjectKey: 'GRB',
+        jiraProjectKey: 'PRJ',
         paperclipProjectId: 'project-1',
         paperclipProjectName: 'Alpha'
       }
@@ -346,7 +346,7 @@ test('issue provider agent tools reject projects with access disabled, missing p
     },
     mappings: [
       {
-        jiraProjectKey: 'GRB',
+        jiraProjectKey: 'PRJ',
         paperclipProjectId: 'project-1',
         paperclipProjectName: 'Alpha'
       }
@@ -376,7 +376,7 @@ test('issue provider agent tools reject projects with access disabled, missing p
     },
     mappings: [
       {
-        jiraProjectKey: 'GRB',
+        jiraProjectKey: 'PRJ',
         paperclipProjectId: 'project-1',
         paperclipProjectName: 'Alpha'
       }

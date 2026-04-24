@@ -66,7 +66,7 @@ test('settings save keeps mappings scoped per company', async () => {
     scheduleFrequencyMinutes: 30,
     mappings: [
       {
-        jiraProjectKey: 'GRB',
+        jiraProjectKey: 'PRJ',
         paperclipProjectId: 'project-1',
         paperclipProjectName: 'Alpha'
       }
@@ -81,7 +81,7 @@ test('settings save keeps mappings scoped per company', async () => {
   });
 
   assert.equal(registration.mappings.length, 1);
-  assert.equal(registration.mappings[0]?.jiraProjectKey, 'GRB');
+  assert.equal(registration.mappings[0]?.jiraProjectKey, 'PRJ');
   assert.equal(registration.mappings[0]?.paperclipProjectId, 'project-1');
   assert.equal(registration.scheduleFrequencyMinutes, 30);
 });
@@ -108,7 +108,7 @@ test('settings registration exposes provider-aware popup data and per-mapping fi
     mappings: [
       {
         providerId: 'provider-default-jira',
-        jiraProjectKey: 'GRB',
+        jiraProjectKey: 'PRJ',
         paperclipProjectId: 'project-1',
         paperclipProjectName: 'Alpha',
         filters: {
@@ -196,7 +196,7 @@ test('project-first sync data contracts expose entry, project, and provider page
       {
         id: 'mapping-1',
         providerId: 'provider-default-jira',
-        jiraProjectKey: 'GRB',
+        jiraProjectKey: 'PRJ',
         paperclipProjectId: 'project-1',
         paperclipProjectName: 'Alpha'
       }
@@ -515,7 +515,7 @@ test('settings and popup data do not resolve Jira secrets just to render provide
     mappings: [
       {
         providerId: 'provider-default-jira',
-        jiraProjectKey: 'GRB',
+        jiraProjectKey: 'PRJ',
         paperclipProjectId: 'project-1',
         paperclipProjectName: 'Alpha'
       }
@@ -561,7 +561,7 @@ test('project-scoped settings persist provider none without falling back to the 
     mappings: [
       {
         id: 'mapping-none',
-        jiraProjectKey: 'GRB',
+        jiraProjectKey: 'PRJ',
         paperclipProjectId: 'project-1',
         paperclipProjectName: 'Alpha',
         filters: {
@@ -589,7 +589,7 @@ test('project-scoped settings persist provider none without falling back to the 
   assert.equal(popupState.configReady, false);
   assert.equal(popupState.projectConfig?.providerId ?? null, null);
   assert.equal(popupState.mappings.length, 1);
-  assert.equal(popupState.mappings[0]?.jiraProjectKey, 'GRB');
+  assert.equal(popupState.mappings[0]?.jiraProjectKey, 'PRJ');
 });
 
 test('sync.runNow refuses to sync a project whose provider is explicitly none', async () => {
@@ -634,7 +634,7 @@ test('sync.runNow refuses to sync a project whose provider is explicitly none', 
       mappings: [
         {
           id: 'mapping-none',
-          jiraProjectKey: 'GRB',
+          jiraProjectKey: 'PRJ',
           paperclipProjectId: 'project-1',
           paperclipProjectName: 'Alpha'
         }

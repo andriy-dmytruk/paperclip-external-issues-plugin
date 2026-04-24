@@ -35,7 +35,6 @@ import {
   findCommentLinkEntityByRemoteId,
   findLinkedIssueEntity,
   findLinkedIssueEntityByIdentity,
-  findLinkedIssueEntityByKey,
   isIssueHidden,
   upsertCommentLinkEntity,
   upsertIssueLinkEntity
@@ -101,25 +100,18 @@ async function importOrUpdateIssueFromUpstream(
 
   const now = new Date().toISOString();
   const providerId = mapping.providerId;
-  const providerType = await getProviderTypeById(ctx, providerId);
   const linkIdentityMetadata = getLinkIdentityMetadata({
-    providerType,
-    jiraProjectKey: mapping.jiraProjectKey,
-    jiraIssueId: upstreamIssue.id,
-    jiraIssueKey: upstreamIssue.key
+    uniqueUpstreamId: upstreamIssue.uniqueUpstreamId
   });
   const existingLinkByIdentity = await findLinkedIssueEntityByIdentity(
     ctx,
-    String(linkIdentityMetadata.upstreamIdentityKey ?? ''),
+    linkIdentityMetadata.uniqueUpstreamId,
     {
       companyId,
       projectId: resolvedProject.id
     }
   ) as Record<string, unknown> | null;
-  const existingLink = (existingLinkByIdentity ?? await findLinkedIssueEntityByKey(ctx, upstreamIssue.key, {
-    companyId,
-    projectId: resolvedProject.id
-  })) as UpstreamIssueLinkData | null;
+  const existingLink = existingLinkByIdentity as UpstreamIssueLinkData | null;
   const importedTitle = ensureIssueTitlePrefix(upstreamIssue.summary, upstreamIssue.key);
   const importedDescription = buildImportedIssueDescription(upstreamIssue);
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useHostContext, usePluginData } from '@paperclipai/plugin-sdk/ui';
 import { type UpstreamUserReference } from '../../assignees.js';
 import { useActionRunner } from '../../hooks.js';
@@ -61,6 +61,7 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
   const [statusEditorOpen, setStatusEditorOpen] = useState(false);
   const [statusTransitionDraft, setStatusTransitionDraft] = useState('');
   const [assigneeEditorOpen, setAssigneeEditorOpen] = useState(false);
+  const commentTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     setUpstreamAssigneeDraft(null);
@@ -75,6 +76,15 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
     setAssigneeEditorOpen(false);
     setStatusTransitionDraft('');
   }, [detail.data?.issueId, detail.data?.upstreamIssueKey]);
+
+  useEffect(() => {
+    const textarea = commentTextareaRef.current;
+    if (!textarea) {
+      return;
+    }
+    textarea.style.height = '0px';
+    textarea.style.height = `${Math.max(96, textarea.scrollHeight)}px`;
+  }, [commentBody]);
 
   if (!detail.data?.visible) {
     return <></>;
@@ -92,6 +102,68 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
   const supportsStatusUpdates = detail.data.supportsStatusUpdates !== false;
   const supportsAssignableUsers = detail.data.supportsAssignableUsers !== false;
   const supportsComments = detail.data.supportsComments !== false;
+  const summaryCardStyle: React.CSSProperties = {
+    border: '1px solid color-mix(in srgb, var(--border) 88%, transparent)',
+    borderRadius: 4,
+    padding: 14,
+    background: 'var(--background, var(--card, transparent))',
+    minWidth: 0,
+    display: 'grid',
+    gap: 10,
+    alignContent: 'start',
+    position: 'relative'
+  };
+  const summaryLabelStyle: React.CSSProperties = {
+    fontSize: 10,
+    opacity: 0.58,
+    letterSpacing: '0.14em',
+    textTransform: 'uppercase',
+    lineHeight: 1.2
+  };
+  const summaryValueStyle: React.CSSProperties = {
+    fontSize: 14,
+    fontWeight: 700,
+    lineHeight: 1.3,
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis'
+  };
+  const summaryAuxValueStyle: React.CSSProperties = {
+    fontSize: 13,
+    fontWeight: 600,
+    lineHeight: 1.35
+  };
+  const composerTextareaStyle: React.CSSProperties = {
+    width: '100%',
+    minHeight: 96,
+    borderRadius: 6,
+    border: '1px solid color-mix(in srgb, var(--border) 96%, transparent)',
+    background: 'transparent',
+    color: 'inherit',
+    padding: '12px 14px',
+    fontSize: 14,
+    lineHeight: 1.5,
+    boxSizing: 'border-box',
+    resize: 'none',
+    overflow: 'hidden'
+  };
+  const composerSendButtonStyle: React.CSSProperties = {
+    ...buttonStyle('primary'),
+    opacity: (!companyId || !issueId || !commentBody.trim() || submitComment.busy) ? 0.6 : 1,
+    background: (!companyId || !issueId || !commentBody.trim() || submitComment.busy)
+      ? 'color-mix(in srgb, var(--foreground, #111827) 40%, transparent)'
+      : 'var(--foreground, #111827)',
+    borderColor: (!companyId || !issueId || !commentBody.trim() || submitComment.busy)
+      ? 'transparent'
+      : 'color-mix(in srgb, var(--foreground, #111827) 88%, transparent)',
+    boxShadow: 'none'
+  };
+  const compactEditButtonStyle: React.CSSProperties = {
+    ...iconButtonStyle(),
+    width: 26,
+    minWidth: 26,
+    height: 26
+  };
 
   return (
     <div style={stackStyle(14)}>
@@ -170,69 +242,70 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
-            <div style={metricCardStyle()}>
-              <div style={{ ...rowStyle(), justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div style={{ fontSize: 11, opacity: 0.58, letterSpacing: '0.14em', textTransform: 'uppercase' }}>Status</div>
-                {supportsStatusUpdates && detail.data.upstreamTransitions && detail.data.upstreamTransitions.length > 0 ? (
-                  <button
-                    type="button"
-                    style={iconButtonStyle()}
-                    disabled={!companyId || !issueId || setUpstreamStatus.busy || !supportsStatusUpdates}
-                    onClick={() => {
-                      setStatusTransitionDraft('');
-                      setStatusEditorOpen(true);
-                    }}
-                    aria-label="Edit status"
-                    title="Edit status"
-                  >
-                    {renderButtonIcon('edit')}
-                  </button>
-                ) : null}
-              </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 10 }}>
+            <div style={summaryCardStyle}>
+              <div style={summaryLabelStyle}>Status</div>
+              {supportsStatusUpdates && detail.data.upstreamTransitions && detail.data.upstreamTransitions.length > 0 ? (
+                <button
+                  type="button"
+                  style={{
+                    ...compactEditButtonStyle,
+                    position: 'absolute',
+                    top: 10,
+                    right: 10
+                  }}
+                  disabled={!companyId || !issueId || setUpstreamStatus.busy || !supportsStatusUpdates}
+                  onClick={() => {
+                    setStatusTransitionDraft('');
+                    setStatusEditorOpen(true);
+                  }}
+                  aria-label="Edit status"
+                  title="Edit status"
+                >
+                  {renderButtonIcon('edit')}
+                </button>
+              ) : null}
               {detail.data.upstreamStatus ? (
-                <strong style={{ fontSize: 16 }}>{statusValue}</strong>
+                <strong style={summaryValueStyle}>{statusValue}</strong>
               ) : (
-                <strong style={{ fontSize: 16 }}>Not linked</strong>
+                <strong style={summaryValueStyle}>Not linked</strong>
               )}
             </div>
 
-            <div style={metricCardStyle()}>
-              <div style={{ ...rowStyle(), justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div style={{ fontSize: 11, opacity: 0.58, letterSpacing: '0.14em', textTransform: 'uppercase' }}>Assignee</div>
-                {isSynced && supportsAssignableUsers ? (
-                  <button
-                    type="button"
-                    style={iconButtonStyle()}
-                    disabled={!companyId || !issueId || !detail.data.upstreamProviderId || setUpstreamAssignee.busy || !supportsAssignableUsers}
-                    onClick={() => {
-                      setUpstreamAssigneeDraft(null);
-                      setAssigneeEditorOpen(true);
-                    }}
-                    aria-label="Edit assignee"
-                    title="Edit assignee"
-                  >
-                    {renderButtonIcon('edit')}
-                  </button>
-                ) : null}
-              </div>
-              <strong style={{ fontSize: 16 }}>{detail.data.upstream?.jiraAssigneeDisplayName ?? 'None'}</strong>
+            <div style={summaryCardStyle}>
+              <div style={summaryLabelStyle}>Assignee</div>
+              {isSynced && supportsAssignableUsers ? (
+                <button
+                  type="button"
+                  style={{
+                    ...compactEditButtonStyle,
+                    position: 'absolute',
+                    top: 10,
+                    right: 10
+                  }}
+                  disabled={!companyId || !issueId || !detail.data.upstreamProviderId || setUpstreamAssignee.busy || !supportsAssignableUsers}
+                  onClick={() => {
+                    setUpstreamAssigneeDraft(null);
+                    setAssigneeEditorOpen(true);
+                  }}
+                  aria-label="Edit assignee"
+                  title="Edit assignee"
+                >
+                  {renderButtonIcon('edit')}
+                </button>
+              ) : null}
+              <strong style={summaryValueStyle}>{detail.data.upstream?.jiraAssigneeDisplayName ?? 'None'}</strong>
             </div>
 
-            <div style={metricCardStyle()}>
-              <div style={{ fontSize: 11, opacity: 0.58, letterSpacing: '0.14em', textTransform: 'uppercase' }}>Creator</div>
-              <strong style={{ fontSize: 16 }}>{detail.data.upstream?.jiraCreatorDisplayName ?? 'Unknown'}</strong>
+            <div style={summaryCardStyle}>
+              <div style={summaryLabelStyle}>Creator</div>
+              <strong style={summaryValueStyle}>{detail.data.upstream?.jiraCreatorDisplayName ?? 'Unknown'}</strong>
             </div>
 
-            <div style={metricCardStyle()}>
-              <div style={{ fontSize: 11, opacity: 0.58, letterSpacing: '0.14em', textTransform: 'uppercase' }}>Comments</div>
-              <strong style={{ fontSize: 16 }}>{upstreamCommentCount}</strong>
-            </div>
+          </div>
 
-            <div style={metricCardStyle()}>
-              <div style={{ fontSize: 11, opacity: 0.58, letterSpacing: '0.14em', textTransform: 'uppercase' }}>Last synced</div>
-              <strong style={{ fontSize: 16, lineHeight: 1.35 }}>{formatDate(detail.data.upstream?.lastSyncedAt)}</strong>
-            </div>
+          <div style={{ fontSize: 12, opacity: 0.66 }}>
+            Last synced {formatDate(detail.data.upstream?.lastSyncedAt)}
           </div>
         </div>
       </div>
@@ -305,19 +378,16 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
               <span style={{ fontSize: 12, opacity: 0.72 }}>{getProviderPostsLabel(providerType)}</span>
             </div>
             <textarea
-              style={{
-                ...inputStyle(),
-                minHeight: 108,
-                resize: 'vertical'
-              }}
+              ref={commentTextareaRef}
+              style={composerTextareaStyle}
               value={commentBody}
               placeholder={getProviderCommentPlaceholder(providerType)}
               onChange={(event) => setCommentBody(event.target.value)}
             />
-            <div style={rowStyle()}>
+            <div style={{ ...rowStyle(), justifyContent: 'flex-end' }}>
               <button
                 type="button"
-                style={buttonStyle('primary')}
+                style={composerSendButtonStyle}
                 disabled={!companyId || !issueId || !commentBody.trim() || submitComment.busy}
                 onClick={() => {
                   void submitComment.run({
@@ -341,14 +411,21 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
 
       {statusEditorOpen && supportsStatusUpdates && detail.data.upstreamTransitions && detail.data.upstreamTransitions.length > 0 ? (
         <div style={modalBackdropStyle()}>
-          <div style={modalPanelStyle(460)}>
-            <div style={stackStyle(12)}>
+          <div style={modalPanelStyle(520)}>
+            <div style={{ ...stackStyle(16), padding: 24 }}>
               <div style={rowStyle()}>
                 <strong>Edit status</strong>
                 {providerType ? <span style={neutralBadgeStyle()}>{providerLabel(providerType, platformName)}</span> : null}
               </div>
-              <div style={{ fontSize: 13, opacity: 0.75 }}>
-                Current: {statusValue}
+              <div style={{
+                fontSize: 13,
+                opacity: 0.75,
+                padding: '10px 12px',
+                border: '1px solid color-mix(in srgb, var(--border) 94%, transparent)',
+                borderRadius: 4
+              }}
+              >
+                Current status: {statusValue}
               </div>
               <label style={stackStyle(6)}>
                 <span style={{ fontSize: 13, fontWeight: 600 }}>New status</span>
@@ -363,7 +440,13 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
                   ))}
                 </select>
               </label>
-              <div style={rowStyle()}>
+              <div style={{
+                ...rowStyle(),
+                justifyContent: 'flex-end',
+                borderTop: '1px solid color-mix(in srgb, var(--border) 94%, transparent)',
+                paddingTop: 16
+              }}
+              >
                 <button
                   type="button"
                   style={buttonStyle()}
@@ -402,14 +485,21 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
 
       {assigneeEditorOpen ? (
         <div style={modalBackdropStyle()}>
-          <div style={{ ...modalPanelStyle(720), overflow: 'visible' }}>
-            <div style={stackStyle(12)}>
+          <div style={{ ...modalPanelStyle(620), overflow: 'visible' }}>
+            <div style={{ ...stackStyle(16), padding: 24 }}>
               <div style={rowStyle()}>
                 <strong>Edit assignee</strong>
                 {providerType ? <span style={neutralBadgeStyle()}>{providerLabel(providerType, platformName)}</span> : null}
               </div>
-              <div style={{ fontSize: 13, opacity: 0.75 }}>
-                Current: {detail.data.upstream?.jiraAssigneeDisplayName ?? 'None'}
+              <div style={{
+                fontSize: 13,
+                opacity: 0.75,
+                padding: '10px 12px',
+                border: '1px solid color-mix(in srgb, var(--border) 94%, transparent)',
+                borderRadius: 4
+              }}
+              >
+                Current assignee: {detail.data.upstream?.jiraAssigneeDisplayName ?? 'None'}
               </div>
               <UpstreamUserAutocomplete
                 companyId={companyId}
@@ -418,13 +508,19 @@ export function JiraSyncIssueTaskDetailView(): React.JSX.Element {
                 value={upstreamAssigneeDraft}
                 disabled={!companyId || !issueId || !detail.data.upstreamProviderId || setUpstreamAssignee.busy}
                 placeholder={getProviderUsersPlaceholder(providerType)}
-                dropdownMaxHeight={240}
+                dropdownMaxHeight={280}
                 hideSelectedSecondary
                 onChange={(user) => {
                   setUpstreamAssigneeDraft(user);
                 }}
               />
-              <div style={rowStyle()}>
+              <div style={{
+                ...rowStyle(),
+                justifyContent: 'flex-end',
+                borderTop: '1px solid color-mix(in srgb, var(--border) 94%, transparent)',
+                paddingTop: 16
+              }}
+              >
                 <button
                   type="button"
                   style={buttonStyle()}

@@ -45,7 +45,7 @@ type ProviderIconSize = 'sm' | 'md';
 export function cardStyle(): React.CSSProperties {
   return {
     border: '1px solid var(--border)',
-    borderRadius: 14,
+    borderRadius: 18,
     padding: 16,
     background: 'var(--card, transparent)',
     color: 'inherit'
@@ -202,33 +202,104 @@ export function providerLabel(providerType?: ProviderType | string | null, label
 }
 
 export function buttonStyle(variant: 'primary' | 'secondary' | 'success' = 'secondary'): React.CSSProperties {
-  void variant;
+  const palette =
+    variant === 'primary'
+      ? {
+          background: 'var(--foreground, #111827)',
+          color: 'var(--background, #ffffff)',
+          border: 'color-mix(in srgb, var(--foreground, #111827) 88%, transparent)',
+          boxShadow: '0 1px 2px rgba(15, 23, 42, 0.08)'
+        }
+      : variant === 'success'
+        ? {
+            background: 'color-mix(in srgb, #16a34a 10%, var(--background, #ffffff))',
+            color: 'inherit',
+            border: 'color-mix(in srgb, #16a34a 28%, var(--border))',
+            boxShadow: '0 1px 2px rgba(15, 23, 42, 0.06)'
+          }
+        : {
+            background: 'var(--background, transparent)',
+            color: 'inherit',
+            border: 'color-mix(in srgb, var(--border) 96%, transparent)',
+            boxShadow: '0 1px 2px rgba(15, 23, 42, 0.06)'
+          };
   return {
-    borderRadius: 8,
-    padding: '6px 10px',
-    border: '1px solid var(--border)',
-    background: 'transparent',
-    color: 'inherit',
+    borderRadius: 6,
+    padding: '0 12px',
+    border: `1px solid ${palette.border}`,
+    background: palette.background,
+    color: palette.color,
+    boxShadow: palette.boxShadow,
     cursor: 'pointer',
     fontWeight: 500,
     fontSize: 13,
-    lineHeight: 1.3
+    lineHeight: 1.2,
+    minHeight: 36,
+    height: 36,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    boxSizing: 'border-box',
+    whiteSpace: 'nowrap'
   };
 }
 
 export function iconButtonStyle(): React.CSSProperties {
   return {
-    borderRadius: 999,
-    width: 28,
-    height: 28,
+    borderRadius: 6,
+    width: 36,
+    height: 36,
     border: '1px solid color-mix(in srgb, var(--border) 92%, transparent)',
-    background: 'color-mix(in srgb, currentColor 2%, transparent)',
+    background: 'var(--background, transparent)',
     color: 'inherit',
     cursor: 'pointer',
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 0,
+    boxShadow: '0 1px 2px rgba(15, 23, 42, 0.06)',
+    flex: '0 0 auto'
+  };
+}
+
+export function toolbarButtonStyle(): React.CSSProperties {
+  return {
+    borderRadius: 6,
+    minHeight: 36,
+    height: 36,
+    padding: '0 12px',
+    border: '1px solid var(--border)',
+    background: 'var(--background, transparent)',
+    color: 'inherit',
+    cursor: 'pointer',
+    fontWeight: 500,
+    fontSize: 14,
+    lineHeight: 1.2,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxSizing: 'border-box',
+    boxShadow: '0 1px 2px rgba(15, 23, 42, 0.06)'
+  };
+}
+
+export function toolbarIconButtonStyle(): React.CSSProperties {
+  return {
+    borderRadius: 6,
+    width: 36,
+    minWidth: 36,
+    height: 36,
+    border: '1px solid var(--border)',
+    background: 'var(--background, transparent)',
+    color: 'inherit',
+    cursor: 'pointer',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 0,
+    boxSizing: 'border-box',
+    boxShadow: '0 1px 2px rgba(15, 23, 42, 0.06)',
     flex: '0 0 auto'
   };
 }
@@ -236,14 +307,16 @@ export function iconButtonStyle(): React.CSSProperties {
 export function inputStyle(): React.CSSProperties {
   return {
     width: '100%',
-    borderRadius: 8,
-    border: '1px solid var(--border)',
-    padding: '8px 10px',
-    background: 'var(--card, transparent)',
+    borderRadius: 6,
+    border: '1px solid color-mix(in srgb, var(--border) 96%, transparent)',
+    padding: '0 12px',
+    background: 'var(--background, var(--card, transparent))',
     color: 'inherit',
-    fontSize: 13,
+    fontSize: 14,
     lineHeight: 1.3,
-    boxSizing: 'border-box'
+    boxSizing: 'border-box',
+    minHeight: 36,
+    height: 36
   };
 }
 
@@ -341,9 +414,9 @@ export function neutralBadgeStyle(): React.CSSProperties {
 export function metricCardStyle(): React.CSSProperties {
   return {
     border: '1px solid color-mix(in srgb, var(--border) 88%, transparent)',
-    borderRadius: 16,
+    borderRadius: 4,
     padding: 16,
-    background: 'color-mix(in srgb, currentColor 2%, var(--card, transparent))',
+    background: 'var(--background, var(--card, transparent))',
     minWidth: 0,
     display: 'grid',
     gap: 10
@@ -352,10 +425,10 @@ export function metricCardStyle(): React.CSSProperties {
 
 export function sectionCardStyle(): React.CSSProperties {
   return {
-    border: '1px solid color-mix(in srgb, var(--border) 92%, transparent)',
-    borderRadius: 18,
-    padding: 18,
-    background: 'var(--card, transparent)',
+    border: '1px solid color-mix(in srgb, var(--border) 94%, transparent)',
+    borderRadius: 4,
+    padding: 20,
+    background: 'var(--background, var(--card, transparent))',
     minWidth: 0
   };
 }
@@ -363,21 +436,27 @@ export function sectionCardStyle(): React.CSSProperties {
 export function tabListStyle(): React.CSSProperties {
   return {
     display: 'flex',
-    gap: 8,
-    flexWrap: 'wrap'
+    gap: 16,
+    flexWrap: 'wrap',
+    borderBottom: '1px solid color-mix(in srgb, var(--border) 94%, transparent)',
+    alignItems: 'flex-end'
   };
 }
 
 export function tabButtonStyle(selected = false): React.CSSProperties {
   return {
-    borderRadius: 999,
-    padding: '7px 12px',
-    border: '1px solid var(--border)',
-    background: selected ? 'color-mix(in srgb, currentColor 8%, transparent)' : 'transparent',
+    borderRadius: 0,
+    padding: '0 0 10px',
+    border: 'none',
+    borderBottom: selected ? '2px solid currentColor' : '2px solid transparent',
+    marginBottom: -1,
+    background: 'transparent',
     color: 'inherit',
     cursor: 'pointer',
     fontSize: 13,
-    fontWeight: selected ? 600 : 500
+    lineHeight: 1.2,
+    fontWeight: selected ? 600 : 500,
+    opacity: selected ? 1 : 0.72
   };
 }
 
@@ -568,7 +647,7 @@ export function getProviderProjectLabel(providerType?: ProviderType | string | n
 
 export function getProviderProjectPlaceholder(providerType?: ProviderType | string | null): string {
   const normalized = normalizeProviderType(providerType);
-  return isGitHubProviderType(normalized) ? 'owner/repo' : 'GRB';
+  return isGitHubProviderType(normalized) ? 'owner/repo' : 'PRJ';
 }
 
 export function getSuggestedUpstreamProjectKey(
@@ -704,21 +783,44 @@ export function modalBackdropStyle(): React.CSSProperties {
   return {
     position: 'fixed',
     inset: 0,
-    background: 'color-mix(in srgb, #111827 50%, transparent)',
+    background: 'color-mix(in srgb, #111827 34%, transparent)',
     display: 'grid',
     placeItems: 'center',
-    padding: 24,
+    padding: 20,
     zIndex: 9999
   };
 }
 
 export function modalPanelStyle(width = 560): React.CSSProperties {
   return {
-    ...cardStyle(),
+    border: '1px solid color-mix(in srgb, var(--border) 94%, transparent)',
+    borderRadius: 4,
+    background: 'var(--background, var(--card, Canvas))',
+    color: 'inherit',
     width: `min(100%, ${width}px)`,
     maxHeight: 'min(86vh, 900px)',
+    overflow: 'hidden',
+    boxShadow: '0 32px 80px rgba(15, 23, 42, 0.18)'
+  };
+}
+
+export function modalHeaderStyle(): React.CSSProperties {
+  return {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 16,
+    padding: '18px 22px',
+    borderBottom: '1px solid color-mix(in srgb, var(--border) 94%, transparent)',
+    background: 'color-mix(in srgb, var(--background, white) 92%, var(--card, transparent) 8%)'
+  };
+}
+
+export function modalBodyStyle(): React.CSSProperties {
+  return {
+    padding: 22,
     overflowY: 'auto',
-    boxShadow: '0 24px 60px rgba(15, 23, 42, 0.28)'
+    maxHeight: 'calc(min(86vh, 900px) - 78px)'
   };
 }
 
