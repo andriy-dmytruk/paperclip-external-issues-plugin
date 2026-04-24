@@ -10,6 +10,7 @@ import type { JiraIssueRecord } from '../jira/models.ts';
 import type {
   StatusMappingRule,
   UpstreamProjectMapping as JiraMapping,
+  SyncTaskFilters,
   UpstreamUserReference as JiraUserReference
 } from '../../worker/core/models.ts';
 
@@ -40,15 +41,73 @@ function parseIssueKey(issueKey: string, config: GitHubConfig) {
   return { repo, issueNumber };
 }
 
-function normalizeIssueRecord(value: unknown, repoFullName: string): JiraIssueRecord {
+function normalizeIssueRecord(value: unknown, repoFullName: string, apiBaseUrl: string): JiraIssueRecord {
   return normalizeGitHubIssueRecord(
     value as Parameters<typeof normalizeGitHubIssueRecord>[0],
     repoFullName,
     {
       getStatusName: getGitHubStatusName,
-      getStatusCategory: getGitHubStatusCategory
+      getStatusCategory: getGitHubStatusCategory,
+      apiBaseUrl
     }
   );
+}
+
+function getUserFilterLogin(user?: JiraUserReference): string | undefined {
+  const login = (user?.username ?? user?.accountId ?? '').trim().toLowerCase();
+  return login || undefined;
+}
+
+function isPullRequestIssue(issue: Record<string, unknown>): boolean {
+  return Object.prototype.hasOwnProperty.call(issue, 'pull_request');
+}
+
+function matchesGitHubFilters(issue: {
+  state?: string | null;
+  number?: number;
+  user?: { login?: string | null } | null;
+  assignees?: Array<{ login?: string | null } | null> | null;
+}, filters?: SyncTaskFilters): boolean {
+  if (!filters) {
+    return true;
+  }
+
+  if (filters.onlyActive && issue.state !== 'open') {
+    return false;
+  }
+
+  if (
+    typeof filters.issueNumberGreaterThan === 'number' &&
+    typeof issue.number === 'number' &&
+    issue.number <= filters.issueNumberGreaterThan
+  ) {
+    return false;
+  }
+
+  if (
+    typeof filters.issueNumberLessThan === 'number' &&
+    typeof issue.number === 'number' &&
+    issue.number >= filters.issueNumberLessThan
+  ) {
+    return false;
+  }
+
+  const expectedAuthor = getUserFilterLogin(filters.author);
+  if (expectedAuthor && issue.user?.login?.trim().toLowerCase() !== expectedAuthor) {
+    return false;
+  }
+
+  const expectedAssignee = getUserFilterLogin(filters.assignee);
+  if (expectedAssignee) {
+    const assigneeLogins = (issue.assignees ?? [])
+      .map((assignee) => assignee?.login?.trim().toLowerCase())
+      .filter((login): login is string => Boolean(login));
+    if (!assigneeLogins.includes(expectedAssignee)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function getDefaultStatusMappings(): StatusMappingRule[] {
@@ -227,6 +286,7 @@ export function createGitHubIssuesProviderAdapter<TContext>(): SyncProviderAdapt
       },
       searchIssues: async (mapping, options) => {
         const repo = getRepoReferenceFromMapping(mapping as JiraMapping, config);
+        const filters = options?.filters as SyncTaskFilters | undefined;
         if (options?.issueKey) {
           const issueNumberMatch = options.issueKey.match(/#(\d+)$/);
           if (!issueNumberMatch) {
@@ -250,7 +310,7 @@ export function createGitHubIssuesProviderAdapter<TContext>(): SyncProviderAdapt
               })
             ))
           ]);
-          const issueRecord = normalizeIssueRecord(issueResponse.data, `${repo.owner}/${repo.repo}`);
+          const issueRecord = normalizeIssueRecord(issueResponse.data, `${repo.owner}/${repo.repo}`, config.apiBaseUrl);
           return [{
             ...issueRecord,
             comments: commentsResponse.data.map((comment) => normalizeGitHubCommentRecord(
@@ -259,17 +319,22 @@ export function createGitHubIssuesProviderAdapter<TContext>(): SyncProviderAdapt
           }];
         }
 
+        const assignee = getUserFilterLogin(filters?.assignee);
+        const creator = getUserFilterLogin(filters?.author);
         const response = await githubApiCall(context as Parameters<typeof githubApiCall>[0], config, async (api) => (
           await api.rest.issues.listForRepo({
             owner: repo.owner,
             repo: repo.repo,
-            state: 'all',
-            per_page: 50
+            state: filters?.onlyActive ? 'open' : 'all',
+            ...(assignee ? { assignee } : {}),
+            ...(creator ? { creator } : {}),
+            per_page: 100
           })
         ));
         return response.data
-          .filter((issue) => !Object.prototype.hasOwnProperty.call(issue as Record<string, unknown>, 'pull_request'))
-          .map((issue) => normalizeIssueRecord(issue, `${repo.owner}/${repo.repo}`));
+          .filter((issue) => !isPullRequestIssue(issue as Record<string, unknown>))
+          .filter((issue) => matchesGitHubFilters(issue, filters))
+          .map((issue) => normalizeIssueRecord(issue, `${repo.owner}/${repo.repo}`, config.apiBaseUrl));
       },
       createIssue: async (mapping, issue) => {
         const repo = getRepoReferenceFromMapping(mapping as JiraMapping, config);
@@ -281,7 +346,7 @@ export function createGitHubIssuesProviderAdapter<TContext>(): SyncProviderAdapt
             body: stripIssueMarker((issue as Issue).description ?? '')
           })
         ));
-        return normalizeIssueRecord(response.data, `${repo.owner}/${repo.repo}`);
+        return normalizeIssueRecord(response.data, `${repo.owner}/${repo.repo}`, config.apiBaseUrl);
       },
       updateIssue: async (issueKey, issue) => {
         const { repo, issueNumber } = parseIssueKey(issueKey, config);
