@@ -328,7 +328,7 @@ export function createGitHubIssuesProviderAdapter<TContext>(): SyncProviderAdapt
             state: filters?.onlyActive ? 'open' : 'all',
             ...(assignee ? { assignee } : {}),
             ...(creator ? { creator } : {}),
-            per_page: 100
+            per_page: 50
           })
         ));
         return response.data

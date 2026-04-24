@@ -14,11 +14,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/alvarosanchez/paperclip-external-issues-plugin.git"
+    "url": "git+https://github.com/andriy-dmytruk/paperclip-external-issues-plugin.git"
   },
-  "homepage": "https://github.com/alvarosanchez/paperclip-external-issues-plugin#readme",
+  "homepage": "https://github.com/andriy-dmytruk/paperclip-external-issues-plugin#readme",
   "bugs": {
-    "url": "https://github.com/alvarosanchez/paperclip-external-issues-plugin/issues"
+    "url": "https://github.com/andriy-dmytruk/paperclip-external-issues-plugin/issues"
   },
   "keywords": [
     "paperclip",
