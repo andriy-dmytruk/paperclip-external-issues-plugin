@@ -22,15 +22,20 @@
   },
   "keywords": [
     "paperclip",
+    "paperclip plugin",
+    "paperclip jira",
     "plugin",
     "issues",
     "issue-sync",
     "issue-tracker",
     "jira",
+    "jira sync",
     "jira data center",
     "jira cloud",
     "github",
     "github issues",
+    "github sync",
+    "external issue sync",
     "sync"
   ],
   "files": [

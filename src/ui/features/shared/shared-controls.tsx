@@ -17,6 +17,14 @@ import {
 } from '../../primitives.js';
 import type { UpstreamUserSearchData, SyncProgressState, UpstreamProjectSearchData } from '../../types.js';
 
+function getCustomProjectSelectionLabel(providerType?: ProviderType | null): string {
+  return isGitHubProviderType(providerType) ? 'Custom repository' : 'Custom project key';
+}
+
+function getCurrentProjectSelectionLabel(providerType?: ProviderType | null): string {
+  return isGitHubProviderType(providerType) ? 'Current repository' : 'Current project key';
+}
+
 function selectorTriggerStyle(disabled?: boolean): React.CSSProperties {
   return {
     width: '100%',
@@ -403,16 +411,6 @@ export function UpstreamProjectAutocomplete(props: {
       custom?: boolean;
     }> = [];
 
-    if (normalizedQuery.length > 0) {
-      items.push({
-        key: `__custom__:${normalizedQuery.toLowerCase()}`,
-        value: normalizedQuery,
-        label: normalizedQuery,
-        secondary: `Use this ${getProviderMappingSummaryNoun(props.providerType)}`,
-        custom: true
-      });
-    }
-
     for (const suggestion of suggestions) {
       const suggestionValue = suggestion.key.trim();
       const optionKey = suggestionValue.toLowerCase();
@@ -422,8 +420,25 @@ export function UpstreamProjectAutocomplete(props: {
       items.push({
         key: optionKey,
         value: suggestionValue,
-        label: suggestion.displayName || suggestionValue,
-        secondary: isGitHubProviderType(props.providerType) ? (suggestion.url ?? suggestionValue) : suggestionValue
+        label: isGitHubProviderType(props.providerType)
+          ? (suggestion.displayName || suggestionValue)
+          : suggestionValue,
+        secondary: isGitHubProviderType(props.providerType)
+          ? (suggestion.url ?? suggestionValue)
+          : (suggestion.displayName && suggestion.displayName !== suggestionValue ? suggestion.displayName : undefined)
+      });
+    }
+
+    if (
+      normalizedQuery.length > 0
+      && !items.some((item) => item.value.toLowerCase() === normalizedQuery.toLowerCase())
+    ) {
+      items.unshift({
+        key: `__custom__:${normalizedQuery.toLowerCase()}`,
+        value: normalizedQuery,
+        label: normalizedQuery,
+        secondary: getCustomProjectSelectionLabel(props.providerType),
+        custom: true
       });
     }
 
@@ -432,7 +447,7 @@ export function UpstreamProjectAutocomplete(props: {
         key: selectedKey,
         value: props.value.trim(),
         label: props.value.trim(),
-        secondary: `Current ${getProviderMappingSummaryNoun(props.providerType)}`
+        secondary: getCurrentProjectSelectionLabel(props.providerType)
       });
     }
 
