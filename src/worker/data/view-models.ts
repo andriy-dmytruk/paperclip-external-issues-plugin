@@ -244,11 +244,15 @@ export async function buildProjectToolbarStateData(
     settingsData.syncState && typeof settingsData.syncState === 'object'
       ? settingsData.syncState as AnyRecord
       : {};
+  const configured = Boolean(providerId) && settingsData.configReady === true;
+  const syncStatus = configured
+    ? (normalizeOptionalString(syncStateRecord.status) ?? 'idle')
+    : 'idle';
 
   return {
-    configured: Boolean(providerId) && settingsData.configReady === true,
-    syncFailed: normalizeOptionalString(syncStateRecord.status) === 'error',
-    syncStatus: normalizeOptionalString(syncStateRecord.status) ?? 'idle',
+    configured,
+    syncFailed: configured && syncStatus === 'error',
+    syncStatus,
     providerType,
     providerName: normalizeOptionalString(providerName),
     projectId,

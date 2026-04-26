@@ -657,6 +657,54 @@ test('sync.runNow refuses to sync a project whose provider is explicitly none', 
   }
 });
 
+test('sync.projectToolbarState stays neutral when provider is none even if last sync attempt failed', async () => {
+  const harness = createTestHarness({
+    manifest,
+    config: {
+      providers: [
+        {
+          id: 'provider-default-jira',
+          type: 'jira',
+          name: 'Default Jira',
+          jiraBaseUrl: 'https://jira.example.com',
+          jiraToken: 'jira-token'
+        }
+      ]
+    } as any
+  });
+  await plugin.definition.setup(harness.ctx);
+
+  harness.seed({
+    projects: [makeProject()]
+  });
+
+  await harness.performAction('sync.project.save', {
+    companyId: 'company-1',
+    projectId: 'project-1',
+    projectName: 'Alpha',
+    providerId: null,
+    mappings: []
+  });
+
+  await harness.performAction('sync.runNow', {
+    companyId: 'company-1',
+    projectId: 'project-1'
+  });
+
+  const toolbarState = await harness.getData<{
+    configured: boolean;
+    syncFailed?: boolean;
+    syncStatus?: string;
+  }>('sync.projectToolbarState', {
+    companyId: 'company-1',
+    projectId: 'project-1'
+  });
+
+  assert.equal(toolbarState.configured, false);
+  assert.equal(toolbarState.syncFailed, false);
+  assert.equal(toolbarState.syncStatus, 'idle');
+});
+
 test('sync.project.refreshIdentity returns a structured Jira user reference', async () => {
   const restoreFetch = installMockFetch(async (input) => {
     const url = typeof input === 'string' ? input : input.toString();
