@@ -129,7 +129,9 @@ export async function pushIssueToUpstream(
     }
     upstreamIssue = reloadedIssue;
   } else {
-    upstreamIssue = await createUpstreamIssueForProvider(ctx, mapping, issue as Issue);
+    upstreamIssue = await createUpstreamIssueForProvider(ctx, mapping, issue as Issue, {
+      assignee: projectConfig.defaultAssignee
+    });
   }
 
   await ctx.issues.update(

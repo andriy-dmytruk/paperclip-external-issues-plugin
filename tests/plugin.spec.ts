@@ -1181,6 +1181,281 @@ test('issue.pushToUpstream creates an upstream issue and stores link metadata', 
   }
 });
 
+test('issue.pushToUpstream sends a plain string description to Jira Data Center on create', async () => {
+  let createRequestBody: Record<string, any> | undefined;
+  const restoreFetch = installMockFetch(async (input, init) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/rest/api/2/issue') && init?.method === 'POST') {
+      createRequestBody = JSON.parse(String(init.body));
+      return jsonResponse({
+        id: '10002',
+        key: 'PRJ-999'
+      }, 201);
+    }
+    if (url.endsWith('/rest/api/2/issue/PRJ-999?fields=summary,description,status,comment,updated,created,issuetype,assignee,creator,reporter')) {
+      return jsonResponse({
+        id: '10002',
+        key: 'PRJ-999',
+        fields: {
+          summary: 'Local Paperclip issue',
+          description: 'Local body',
+          status: {
+            name: 'Backlog',
+            statusCategory: {
+              name: 'To Do'
+            }
+          },
+          comment: {
+            comments: []
+          },
+          updated: '2026-04-21T13:08:38.000+0000',
+          created: '2026-04-21T13:03:54.000+0000',
+          issuetype: {
+            name: 'Task'
+          }
+        }
+      });
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  try {
+    const harness = createTestHarness({
+      manifest,
+      config: {
+        jiraBaseUrl: 'https://jira.example.com',
+        jiraToken: 'jira-token'
+      } as any
+    });
+    await plugin.definition.setup(harness.ctx);
+
+    harness.seed({
+      projects: [makeProject()],
+      issues: [makeIssue()]
+    });
+
+    await harness.performAction('sync.project.save', {
+      companyId: 'company-1',
+      mappings: [
+        {
+          jiraProjectKey: 'PRJ',
+          paperclipProjectId: 'project-1',
+          paperclipProjectName: 'Alpha'
+        }
+      ]
+    });
+
+    await harness.performAction('issue.pushToUpstream', {
+      companyId: 'company-1',
+      issueId: 'issue-1'
+    });
+
+    assert.equal(typeof createRequestBody?.fields?.description, 'string');
+    assert.equal(createRequestBody?.fields?.description, 'Local body');
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('issue.pushToUpstream sends a plain string description to Jira Data Center on update', async () => {
+  let updateRequestBody: Record<string, any> | undefined;
+  const restoreFetch = installMockFetch(async (input, init) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/rest/api/2/issue') && init?.method === 'POST') {
+      return jsonResponse({
+        id: '10002',
+        key: 'PRJ-999'
+      }, 201);
+    }
+    if (url.endsWith('/rest/api/2/issue/PRJ-999') && init?.method === 'PUT') {
+      updateRequestBody = JSON.parse(String(init.body));
+      return new Response(null, { status: 204 });
+    }
+    if (url.endsWith('/rest/api/2/issue/PRJ-999?fields=summary,description,status,comment,updated,created,issuetype,assignee,creator,reporter')) {
+      return jsonResponse({
+        id: '10002',
+        key: 'PRJ-999',
+        fields: {
+          summary: 'Local Paperclip issue',
+          description: 'Updated local body',
+          status: {
+            name: 'Backlog',
+            statusCategory: {
+              name: 'To Do'
+            }
+          },
+          comment: {
+            comments: []
+          },
+          updated: '2026-04-21T13:08:38.000+0000',
+          created: '2026-04-21T13:03:54.000+0000',
+          issuetype: {
+            name: 'Task'
+          }
+        }
+      });
+    }
+    if (url.endsWith('/rest/api/2/issue/PRJ-999/transitions')) {
+      return jsonResponse({
+        transitions: []
+      });
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  try {
+    const harness = createTestHarness({
+      manifest,
+      config: {
+        jiraBaseUrl: 'https://jira.example.com',
+        jiraToken: 'jira-token'
+      } as any
+    });
+    await plugin.definition.setup(harness.ctx);
+
+    harness.seed({
+      projects: [makeProject()],
+      issues: [makeIssue()]
+    });
+
+    await harness.performAction('sync.project.save', {
+      companyId: 'company-1',
+      mappings: [
+        {
+          jiraProjectKey: 'PRJ',
+          paperclipProjectId: 'project-1',
+          paperclipProjectName: 'Alpha'
+        }
+      ]
+    });
+
+    await harness.performAction('issue.pushToUpstream', {
+      companyId: 'company-1',
+      issueId: 'issue-1'
+    });
+
+    await harness.ctx.issues.update('issue-1', {
+      description: 'Updated local body'
+    }, 'company-1');
+
+    await harness.performAction('issue.pushToUpstream', {
+      companyId: 'company-1',
+      issueId: 'issue-1'
+    });
+
+    assert.equal(typeof updateRequestBody?.fields?.description, 'string');
+    assert.equal(updateRequestBody?.fields?.description, 'Updated local body');
+  } finally {
+    restoreFetch();
+  }
+});
+
+test('issue.pushToUpstream applies the configured default assignee when creating a Jira issue', async () => {
+  let assigned = false;
+  let assigneeRequestBody: Record<string, any> | undefined;
+  const restoreFetch = installMockFetch(async (input, init) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith('/rest/api/2/issue') && init?.method === 'POST') {
+      return jsonResponse({
+        id: '10002',
+        key: 'PRJ-999'
+      }, 201);
+    }
+    if (url.endsWith('/rest/api/2/issue/PRJ-999/assignee') && init?.method === 'PUT') {
+      assigned = true;
+      assigneeRequestBody = JSON.parse(String(init.body));
+      return new Response(null, { status: 204 });
+    }
+    if (url.endsWith('/rest/api/2/issue/PRJ-999?fields=summary,description,status,comment,updated,created,issuetype,assignee,creator,reporter')) {
+      return jsonResponse({
+        id: '10002',
+        key: 'PRJ-999',
+        fields: {
+          summary: 'Local Paperclip issue',
+          description: 'Local body',
+          status: {
+            name: 'Backlog',
+            statusCategory: {
+              name: 'To Do'
+            }
+          },
+          comment: {
+            comments: []
+          },
+          assignee: assigned
+            ? { displayName: 'Paperclip User' }
+            : undefined,
+          updated: '2026-04-21T13:08:38.000+0000',
+          created: '2026-04-21T13:03:54.000+0000',
+          issuetype: {
+            name: 'Task'
+          }
+        }
+      });
+    }
+    if (url.endsWith('/rest/api/2/issue/PRJ-999/transitions')) {
+      return jsonResponse({
+        transitions: []
+      });
+    }
+
+    throw new Error(`Unexpected fetch: ${url}`);
+  });
+
+  try {
+    const harness = createTestHarness({
+      manifest,
+      config: {
+        jiraBaseUrl: 'https://jira.example.com',
+        jiraToken: 'jira-token'
+      } as any
+    });
+    await plugin.definition.setup(harness.ctx);
+
+    harness.seed({
+      projects: [makeProject()],
+      issues: [makeIssue()]
+    });
+
+    await harness.performAction('sync.project.save', {
+      companyId: 'company-1',
+      projectId: 'project-1',
+      projectName: 'Alpha',
+      providerId: 'provider-default-jira',
+      defaultAssignee: {
+        accountId: 'user-123',
+        displayName: 'Paperclip User'
+      },
+      mappings: [
+        {
+          jiraProjectKey: 'PRJ',
+          paperclipProjectId: 'project-1',
+          paperclipProjectName: 'Alpha'
+        }
+      ]
+    });
+
+    await harness.performAction('issue.pushToUpstream', {
+      companyId: 'company-1',
+      issueId: 'issue-1'
+    });
+
+    const presentation = await harness.getData<{
+      upstream?: { jiraAssigneeDisplayName?: string };
+    }>('issue.syncPresentation', {
+      companyId: 'company-1',
+      issueId: 'issue-1'
+    });
+
+    assert.equal(assigneeRequestBody?.name, 'user-123');
+    assert.equal(presentation.upstream?.jiraAssigneeDisplayName, 'Paperclip User');
+  } finally {
+    restoreFetch();
+  }
+});
+
 test('sync.runNow reports progress counts and prefixes synced issue titles', async () => {
   const restoreFetch = installMockFetch(async (input) => {
     const url = typeof input === 'string' ? input : input.toString();

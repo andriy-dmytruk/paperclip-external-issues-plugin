@@ -145,13 +145,27 @@ export async function searchUpstreamIssues(
 export async function createUpstreamIssueForProvider(
   ctx: PluginSetupContext,
   mapping: UpstreamMapping,
-  issue: Issue
+  issue: Issue,
+  options?: { assignee?: UpstreamUserReference }
 ): Promise<UpstreamIssueRecord> {
   const { provider } = await getBoundProvider(ctx, mapping.providerId);
   if (!provider.capabilities.supportsIssueCreation || !provider.createIssue) {
     throw unsupportedFeatureError(provider.label, 'creating upstream issues');
   }
-  return await provider.createIssue(mapping, issue) as UpstreamIssueRecord;
+  const createdIssue = await provider.createIssue(mapping, issue) as UpstreamIssueRecord;
+  const defaultAssignee = options?.assignee;
+  if (!defaultAssignee || !provider.capabilities.supportsAssignableUsers || !provider.setAssignee) {
+    return createdIssue;
+  }
+
+  await provider.setAssignee(createdIssue.key, defaultAssignee);
+
+  if (!provider.searchIssues) {
+    return createdIssue;
+  }
+
+  const [reloadedIssue] = await provider.searchIssues(mapping, { issueKey: createdIssue.key }) as UpstreamIssueRecord[];
+  return reloadedIssue ?? createdIssue;
 }
 
 export async function updateUpstreamIssueForProvider(

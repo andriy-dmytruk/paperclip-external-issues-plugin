@@ -2,6 +2,7 @@ import type { Issue } from '@paperclipai/plugin-sdk';
 import type { JiraIssueRecord } from '../jira/models.ts';
 import type { JiraRuntimeConfig } from '../jira/api.ts';
 import { jiraApiCall, jiraApiCallAllowNoContent, jiraFetchJson } from '../jira/api.ts';
+import { buildJiraDescriptionPayloads, shouldRetryWithAlternateJiraDescriptionPayload } from '../jira/description-payload.ts';
 import { buildJiraSearchJql, normalizeJiraIssue, normalizeJiraStatusName, plainTextToAdf, targetJiraTransitionNames } from '../jira/normalize.ts';
 import { DEFAULT_JIRA_ISSUE_TYPE, type JiraCloudProviderConfig } from '../shared/config.ts';
 import type { SyncProviderAdapter } from '../shared/registry.ts';
@@ -296,18 +297,39 @@ export function createJiraCloudProviderAdapter<TContext>(): SyncProviderAdapter<
         options as { issueKey?: string; filters?: JiraTaskFilters } | undefined
       ),
       createIssue: async (mapping, issue) => {
-        const createResponse = await jiraApiCall(context as Parameters<typeof jiraApiCall>[0], config, async (api) => (
-          await api.createIssue({
-            requestBody: {
-              fields: {
-                project: { key: (mapping as JiraMapping).jiraProjectKey },
-                summary: stripIssueTitlePrefix((issue as Issue).title),
-                description: plainTextToAdf(stripIssueMarker((issue as Issue).description ?? '')),
-                issuetype: { name: config.defaultIssueType }
-              }
+        const jiraContext = context as Parameters<typeof jiraApiCall>[0];
+        const descriptionPayloads = buildJiraDescriptionPayloads(
+          stripIssueMarker((issue as Issue).description ?? ''),
+          'adf'
+        );
+        let createResponse: Awaited<ReturnType<typeof jiraApiCall>>;
+        for (let index = 0; index < descriptionPayloads.length; index += 1) {
+          const description = descriptionPayloads[index];
+          try {
+            createResponse = await jiraApiCall(
+              jiraContext,
+              config,
+              async (api) => await api.createIssue({
+                requestBody: {
+                  fields: {
+                    project: { key: (mapping as JiraMapping).jiraProjectKey },
+                    summary: stripIssueTitlePrefix((issue as Issue).title),
+                    description,
+                    issuetype: { name: config.defaultIssueType }
+                  }
+                }
+              })
+            );
+            break;
+          } catch (error) {
+            if (index === descriptionPayloads.length - 1 || !shouldRetryWithAlternateJiraDescriptionPayload(error)) {
+              throw error;
             }
-          })
-        ));
+          }
+        }
+        if (!createResponse) {
+          throw new Error('Jira issue creation did not return a response.');
+        }
         const createdKey = normalizeOptionalString((createResponse as { key?: unknown }).key);
         if (!createdKey) {
           throw new Error('Jira did not return the created issue key.');
@@ -320,17 +342,32 @@ export function createJiraCloudProviderAdapter<TContext>(): SyncProviderAdapter<
         return createdIssue;
       },
       updateIssue: async (issueKey, issue) => {
-        await jiraApiCallAllowNoContent(context as Parameters<typeof jiraApiCallAllowNoContent>[0], config, async (api) => {
-          await api.editIssueRaw({
-            issueIdOrKey: issueKey,
-            requestBody: {
-              fields: {
-                summary: stripIssueTitlePrefix((issue as Issue).title),
-                description: plainTextToAdf(stripIssueMarker((issue as Issue).description ?? ''))
-              }
+        const jiraContext = context as Parameters<typeof jiraApiCallAllowNoContent>[0];
+        const descriptionPayloads = buildJiraDescriptionPayloads(
+          stripIssueMarker((issue as Issue).description ?? ''),
+          'adf'
+        );
+        for (let index = 0; index < descriptionPayloads.length; index += 1) {
+          const description = descriptionPayloads[index];
+          try {
+            await jiraApiCallAllowNoContent(jiraContext, config, async (api) => {
+              await api.editIssueRaw({
+                issueIdOrKey: issueKey,
+                requestBody: {
+                  fields: {
+                    summary: stripIssueTitlePrefix((issue as Issue).title),
+                    description
+                  }
+                }
+              });
+            });
+            return;
+          } catch (error) {
+            if (index === descriptionPayloads.length - 1 || !shouldRetryWithAlternateJiraDescriptionPayload(error)) {
+              throw error;
             }
-          });
-        });
+          }
+        }
       },
       syncStatusFromPaperclip: async (issueKey, status) => {
         const transitions = await listTransitions(context, config, issueKey);
